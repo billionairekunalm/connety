@@ -15,7 +15,7 @@ const defaults: Record<string, () => Row> = {
   events: () => ({}),
   profiles: () => ({ links: [] }),
 }
-const newRow = (table: string, r: Row) => ({ id: crypto.randomUUID(), created_at: new Date().toISOString(), ...defaults[table](), user_id: uid(), ...r })
+const newRow = (table: string, r: Row) => ({ id: crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, created_at: new Date().toISOString(), ...defaults[table](), user_id: uid(), ...r })
 
 function from(table: string) {
   let op = 'select', payload: Row = {}, filter: [string, unknown] | undefined, order: [string, boolean] | undefined, single = false

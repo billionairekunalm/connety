@@ -38,7 +38,15 @@ const PENDING = 'connections-pending-connect' // card id waiting to be connected
 const pub = (path: string | null | undefined) => (path ? supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl : undefined)
 // Links come from other users: force http(s) so a "javascript:" link can never run.
 const safeUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : 'https://' + u.replace(/^[a-z][\w+.-]*:\/*/i, ''))
-const cardUrl = (id: string) => `${location.origin}/?u=${encodeURIComponent(id)}`
+declare const __LAN_IP__: string
+// A phone can't open "localhost", so QR links use the public URL, or this computer's Wi-Fi address in dev.
+const publicOrigin = import.meta.env.VITE_PUBLIC_URL?.replace(/\/$/, '') ||
+  (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && __LAN_IP__
+    ? `${location.protocol}//${__LAN_IP__}:${location.port}`
+    : location.origin)
+const cardUrl = (id: string) => `${publicOrigin}/?u=${encodeURIComponent(id)}`
+// crypto.randomUUID only exists on https/localhost; phones on the Wi-Fi address use plain http.
+const uuid = () => crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 const nn = (s: string) => s.trim() || null
 const DAY = 864e5
 const dueIn = (c: Contact) =>
@@ -71,7 +79,7 @@ async function upload(uid: string, file: File, bucket = 'photos') {
   cv.height = img.height * s
   cv.getContext('2d')!.drawImage(img, 0, 0, cv.width, cv.height)
   const blob = await new Promise<Blob>(r => cv.toBlob(b => r(b!), 'image/jpeg', 0.8))
-  const path = `${uid}/${crypto.randomUUID()}.jpg`
+  const path = `${uid}/${uuid()}.jpg`
   const { error } = await supabase.storage.from(bucket).upload(path, blob, { contentType: 'image/jpeg' })
   if (error) throw error
   return path
