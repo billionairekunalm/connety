@@ -44,7 +44,9 @@ const publicOrigin = import.meta.env.VITE_PUBLIC_URL?.replace(/\/$/, '') ||
   (/^(localhost|127\.0\.0\.1|\[::1\])$/.test(location.hostname) && __LAN_IP__
     ? `${location.protocol}//${__LAN_IP__}:${location.port}`
     : location.origin)
-const cardUrl = (id: string) => `${publicOrigin}/?u=${encodeURIComponent(id)}`
+// QR + share links use publicOrigin; links tapped on this device stay on this address so its login is kept.
+const cardPath = (id: string) => `/?u=${encodeURIComponent(id)}`
+const cardUrl = (id: string) => publicOrigin + cardPath(id)
 // crypto.randomUUID only exists on https/localhost; phones on the Wi-Fi address use plain http.
 const uuid = () => crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 const nn = (s: string) => s.trim() || null
@@ -584,7 +586,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
               </div>
               <div className="quick">
                 <button className="press" onClick={share}><span className="circle"><Ic n="share" /></span>Share link</button>
-                <a className="press" href={cardUrl(uid)} target="_blank" rel="noreferrer"><span className="circle"><Ic n="arrow" /></span>Preview</a>
+                <a className="press" href={cardPath(uid)}><span className="circle"><Ic n="arrow" /></span>Preview</a>
                 <button className="press" onClick={() => setModal({ kind: 'editMe' })}><span className="circle"><Ic n="edit" /></span>Edit</button>
                 {canPrompt() && !isStandalone() && (
                   <button className="press" onClick={promptInstall}><span className="circle"><Ic n="download" /></span>Install</button>
@@ -617,7 +619,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
               </div>
               {person.profile_id && (
                 <div className="pills center-row">
-                  <a className="pill dark press" href={cardUrl(person.profile_id)} target="_blank" rel="noreferrer"><Ic n="card" s={14} /> View their card</a>
+                  <a className="pill dark press" href={cardPath(person.profile_id)}><Ic n="card" s={14} /> View their card</a>
                 </div>
               )}
 
