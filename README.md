@@ -11,5 +11,15 @@ Personal CRM for people you actually meet: selfie, visiting card, where you met,
 4. `npm install` then `npm run dev`.
 
 ## Deploy
-Push to GitHub, import in Vercel/Netlify, set the two `VITE_` env vars. Camera, location and `tel:` calls need HTTPS (Vercel gives you that).
-Add the deployed URL in Supabase → Authentication → URL Configuration.
+Push to GitHub; Vercel builds it. Production builds read Supabase settings from `.env.production`
+(publishable key only, which is safe to be public). Vercel environment variables override it.
+A production build without keys shows "App not configured"; it never falls back to test mode.
+
+Supabase → Authentication → URL Configuration:
+- Site URL: `https://connety-plum.vercel.app`
+- Redirect URLs: `https://connety-plum.vercel.app/**` and `http://localhost:5173/**`
+
+Supabase's built-in email sender is for testing only (a few emails per hour). For real users, add custom SMTP
+(Authentication → Emails → SMTP Settings, e.g. Resend) or turn off "Confirm email".
+
+`npm run dev:offline` runs a browser-storage test mode; `npm run preview` serves the production build.
