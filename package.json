@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:offline": "vite --mode offline --port 5174",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "check": "node src/voice.check.ts"

@@ -4,6 +4,7 @@ import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
 import QRCode from 'qrcode'
 import { LOCAL, supabase } from './supabase'
 import { nameFrom } from './voice'
+import { canPrompt, isIOS, isStandalone, onInstallChange, promptInstall } from './pwa'
 
 type Contact = {
   id: string; event_id: string | null; profile_id: string | null; name: string; phone: string | null
@@ -99,6 +100,7 @@ const PATHS: Record<string, ReactNode> = {
   share: <><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8" /></>,
   logout: <path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10" />,
   download: <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />,
+  lock: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
 }
 const Ic = ({ n, s = 22 }: { n: string; s?: number }) => (
   <svg viewBox="0 0 24 24" width={s} height={s} fill="none" stroke="currentColor" strokeWidth={2}
@@ -122,7 +124,7 @@ export default function App() {
 
   const pid = new URLSearchParams(location.search).get('u')
   if (!ready) return null
-  if (pid) return <PublicCard pid={pid} mine={pid === uid} />
+  if (pid) return <PublicCard pid={pid} mine={pid === uid} loggedIn={!!uid} />
   if (!session || !uid) return <Login />
   if (profile === undefined) return null
   if (!profile) return (
@@ -133,13 +135,32 @@ export default function App() {
   return <Home uid={uid} profile={profile} setProfile={setProfile} />
 }
 
-function PublicCard({ pid, mine }: { pid: string; mine: boolean }) {
+// What someone sees after scanning a QR. Anyone can view the card; saving needs an account.
+function PublicCard({ pid, mine, loggedIn }: { pid: string; mine: boolean; loggedIn: boolean }) {
   const [p, setP] = useState<Profile | null>()
+  const [ask, setAsk] = useState(false)
+  const [, rerender] = useState(0)
   useEffect(() => {
     supabase.rpc('get_profile', { pid }).then(({ data }) => setP((data as Profile[] | null)?.[0] ?? null))
   }, [pid])
+  useEffect(() => onInstallChange(() => rerender(n => n + 1)), [])
+  const installable = !isStandalone() && (canPrompt() || isIOS)
+  // Ask after a few seconds, once they've had a look. Signed-in viewers only see it if there's an app to install.
+  useEffect(() => {
+    if (!p || mine || (loggedIn && !installable)) return
+    const t = setTimeout(() => setAsk(true), 3500)
+    return () => clearTimeout(t)
+  }, [p])
+
+  const connect = () => { localStorage.setItem(PENDING, pid); location.href = '/' }
+  const install = async () => {
+    if (!loggedIn) localStorage.setItem(PENDING, pid) // the installed app picks this up after sign-in
+    if (await promptInstall()) { setAsk(false); if (!loggedIn) location.href = '/' }
+  }
+
   if (p === undefined) return null
   if (!p) return <div className="app"><div className="empty-card">This card doesn't exist anymore.</div></div>
+  const first = p.name.split(' ')[0]
   return (
     <div className="sheet" style={{ '--c': '#a99bff' } as CSSProperties}>
       <div className="detail public">
@@ -147,15 +168,43 @@ function PublicCard({ pid, mine }: { pid: string; mine: boolean }) {
         <div className="cta">
           {mine
             ? <a className="btn-black press" href="/">This is your card · open app</a>
-            : <>
-                <button className="btn-black press" onClick={() => { localStorage.setItem(PENDING, pid); location.href = '/' }}>
-                  <Ic n="plus" s={18} /> Connect with {p.name.split(' ')[0]}
-                </button>
-                <button className="btn-ghost press" onClick={() => saveVcard(p)}><Ic n="download" s={18} /> Save to phone contacts</button>
-              </>}
+            : loggedIn
+              ? <>
+                  <button className="btn-black press" onClick={connect}><Ic n="plus" s={18} /> Connect with {first}</button>
+                  <button className="btn-ghost press" onClick={() => saveVcard(p)}><Ic n="download" s={18} /> Save to phone contacts</button>
+                </>
+              : <button className="btn-black press" onClick={() => setAsk(true)}><Ic n="lock" s={18} /> Sign in to save {first}</button>}
         </div>
         <p className="muted small center made">Made with Connections · only for people you actually met</p>
       </div>
+
+      {ask && (
+        <div className="backdrop" onClick={() => setAsk(false)}>
+          <div className="bottom-sheet" role="dialog" aria-modal="true" aria-labelledby="ask-title" onClick={e => e.stopPropagation()}>
+            <div className="grabber" />
+            <div className="ask-head">
+              <img src="/icon-192.png" alt="" className="app-icon" />
+              {p.photo_path ? <img src={pub(p.photo_path)} alt="" className="app-icon round" /> : <div className="app-icon round">{first[0]}</div>}
+            </div>
+            <h3 id="ask-title">{loggedIn ? 'Get the Connections app' : `Save ${first} & stay in touch`}</h3>
+            <p className="muted">
+              {loggedIn
+                ? 'Open your people, reminders and QR card in one tap from your home screen.'
+                : `Install the app and sign in to save ${first}. You'll be added to each other's lists, and the app reminds you to keep in touch.`}
+            </p>
+            {canPrompt() && !isStandalone() && (
+              <button className="btn-black press" onClick={install}><Ic n="download" s={18} /> Install app</button>
+            )}
+            {isIOS && !isStandalone() && (
+              <div className="ios-hint">Tap <Ic n="share" s={16} /> <b>Share</b> below, then <b>Add to Home Screen</b></div>
+            )}
+            {!loggedIn && (
+              <button className={canPrompt() ? 'btn-ghost press' : 'btn-black press'} onClick={connect}>Sign in or create account</button>
+            )}
+            <button className="not-now" onClick={() => setAsk(false)}>Not now, just looking</button>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
@@ -322,6 +371,8 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
   const [day, setDay] = useState(0)
   const [toast, setToast] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
+  const [, rerender] = useState(0)
+  useEffect(() => onInstallChange(() => rerender(n => n + 1)), [])
   const flash = (t: string) => { setToast(t); setTimeout(() => setToast(''), 2200) }
 
   const load = async () => {
@@ -527,6 +578,9 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
                 <button className="press" onClick={share}><span className="circle"><Ic n="share" /></span>Share link</button>
                 <a className="press" href={cardUrl(uid)} target="_blank" rel="noreferrer"><span className="circle"><Ic n="arrow" /></span>Preview</a>
                 <button className="press" onClick={() => setModal({ kind: 'editMe' })}><span className="circle"><Ic n="edit" /></span>Edit</button>
+                {canPrompt() && !isStandalone() && (
+                  <button className="press" onClick={promptInstall}><span className="circle"><Ic n="download" /></span>Install</button>
+                )}
                 <button className="press" onClick={() => confirm('Sign out?') && supabase.auth.signOut()}><span className="circle"><Ic n="logout" /></span>Sign out</button>
               </div>
               <h3 className="section-label">Your card</h3>
