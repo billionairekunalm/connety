@@ -233,9 +233,16 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 .headline { font-size: 16px; color: var(--muted); margin: -4px 0 12px; }
 .links { display: grid; gap: 10px; margin: 14px 0 20px; }
 .link {
-  display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 12px 12px 22px;
+  display: flex; align-items: center; gap: 12px; padding: 8px;
   border-radius: 999px; color: #111; font-size: 17px; animation: rise .4s ease both;
 }
+.brand {
+  width: 44px; height: 44px; border-radius: 50%; background: #fff; display: grid; place-items: center; flex: none;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, .12);
+}
+.link-row .brand { width: 40px; height: 40px; box-shadow: none; border: 1.5px solid var(--line); }
+.chip-icon { display: inline-flex; align-items: center; gap: 6px; padding-left: 6px; }
+.chip-icon .brand { width: 26px; height: 26px; box-shadow: none; }
 .link b { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .public { padding-top: 40px; }
 .made { padding: 0 0 24px; }
@@ -263,6 +270,17 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 .bottom-sheet p { margin-bottom: 6px; }
 .ios-hint { display: flex; align-items: center; justify-content: center; gap: 6px; flex-wrap: wrap; padding: 14px; border-radius: 18px; background: var(--bg); font-size: 14px; }
 .not-now { padding: 12px; color: var(--muted); font-weight: 500; }
+
+/* photo crop */
+.crop-backdrop { z-index: 4000; align-items: center; }
+.crop-sheet { border-radius: 32px; justify-items: center; margin: 16px; width: calc(100% - 32px); max-width: 400px; padding: 20px; }
+.crop-view { position: relative; overflow: hidden; border-radius: 20px; background: #000; touch-action: none; cursor: grab; user-select: none; }
+.crop-view:active { cursor: grabbing; }
+.crop-view img { position: absolute; left: 50%; top: 50%; max-width: none; pointer-events: none; }
+/* dim outside the circle: that's what shows in avatars; the full square is what gets saved */
+.crop-ring { position: absolute; inset: 0; border-radius: 50%; box-shadow: 0 0 0 999px rgba(0, 0, 0, .5); border: 2px solid rgba(255, 255, 255, .9); pointer-events: none; }
+.crop-zoom { width: 100%; max-width: 280px; padding: 0; border: 0; background: none; accent-color: var(--purple); box-shadow: none !important; }
+.crop-sheet .two { width: 100%; margin: 4px 0 0; }
 
 /* map */
 .map { height: 220px; border-radius: var(--radius); margin: 14px 0; z-index: 0; border: 1.5px solid var(--line); }

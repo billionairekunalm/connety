@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
 import type { Session } from '@supabase/supabase-js'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
 import QRCode from 'qrcode'
@@ -34,6 +35,20 @@ const COLORS = ['', '#ff7a6b', '#ffc145', '#a99bff', '#a9c8ff']
 const TINTS = ['#a99bff', '#ffc145', '#a9c8ff', '#f7b3e4', '#c9e27f']
 const FREQS = [7, 14, 30, 60, 90]
 const LINK_PRESETS = ['LinkedIn', 'Instagram', 'Website', 'X', 'YouTube', 'Portfolio']
+// Which icon a link gets: matched on its label or its address, globe for anything else.
+const LINK_KINDS = [
+  { icon: 'linkedin', hint: 'linkedin.com/in/you', color: '#0a66c2', label: /linked\s*in/i, url: /linkedin\.com/i },
+  { icon: 'instagram', hint: 'instagram.com/you', color: '#e1306c', label: /insta/i, url: /instagram\.com|instagr\.am/i },
+  { icon: 'x', hint: 'x.com/you', color: '#000000', label: /^x$|twitter/i, url: /\b(x|twitter)\.com/i },
+  { icon: 'youtube', hint: 'youtube.com/@you', color: '#ff0000', label: /you\s*tube/i, url: /youtube\.com|youtu\.be/i },
+  { icon: 'portfolio', hint: 'behance.net/you', color: '#7c3aed', label: /portfolio|behance|dribbble/i, url: /behance\.net|dribbble\.com/i },
+]
+const linkKind = (l: Link) =>
+  LINK_KINDS.find(k => k.url.test(l.url)) ?? LINK_KINDS.find(k => k.label.test(l.label)) ?? { icon: 'globe', hint: 'yourwebsite.com', color: '#111111' }
+const LinkIcon = ({ l, s = 20 }: { l: Link; s?: number }) => {
+  const k = linkKind(l)
+  return <span className="brand" style={{ color: k.color }}><Ic n={k.icon} s={s} /></span>
+}
 const PENDING = 'connections-pending-connect' // card id waiting to be connected after login
 const pub = (path: string | null | undefined) => (path ? supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl : undefined)
 // Links come from other users: force http(s) so a "javascript:" link can never run.
@@ -110,6 +125,12 @@ const PATHS: Record<string, ReactNode> = {
   share: <><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8" /></>,
   logout: <path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10" />,
   download: <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />,
+  linkedin: <><rect x="3" y="3" width="18" height="18" rx="4" /><path d="M8 10.5V16M8 7.5v.01M12 16v-5.5M12 13a2.5 2.5 0 0 1 5 0v3" /></>,
+  instagram: <><rect x="3" y="3" width="18" height="18" rx="5.5" /><circle cx="12" cy="12" r="4" /><path d="M17.3 6.7v.01" /></>,
+  x: <path d="M4 4h4.5L20 20h-4.5zM20 4l-6.8 7.6M4 20l6.8-7.6" />,
+  youtube: <><rect x="2.5" y="5.5" width="19" height="13" rx="4" /><path d="M10.2 9.4v5.2l4.4-2.6z" fill="currentColor" /></>,
+  portfolio: <><rect x="3" y="7" width="18" height="13" rx="2.5" /><path d="M8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7M3 12.5h18" /></>,
+  globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9M12 3c-2.5 2.6-3.8 5.6-3.8 9s1.3 6.4 3.8 9" /></>,
   gallery: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></>,
   lock: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
 }
@@ -252,7 +273,7 @@ function CardView({ p }: { p: Profile }) {
         {p.links.map((l, i) => (
           <a key={i} className="link press" style={{ background: TINTS[i % TINTS.length], animationDelay: `${i * 50}ms` }}
             href={safeUrl(l.url)} target="_blank" rel="noopener noreferrer">
-            <b>{l.label || l.url}</b><span className="circle white"><Ic n="arrow" s={18} /></span>
+            <LinkIcon l={l} /><b className="grow">{l.label || l.url}</b><span className="circle white"><Ic n="arrow" s={18} /></span>
           </a>
         ))}
       </div>
@@ -304,7 +325,7 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
       {onboarding && <p className="muted intro">This is what people get when they scan your QR, like a Linktree for the people you meet. Share only what you're happy to give.</p>}
 
       <div className="avatar-pick">
-        <PhotoTile label="Your photo" icon="camera" capture="user" file={photo} url={pub(p?.photo_path)} onFile={setPhoto} />
+        <PhotoTile crop label="Your photo" icon="camera" capture="user" file={photo} url={pub(p?.photo_path)} onFile={setPhoto} />
       </div>
       <label>Full name *<input required value={f.name} onChange={set('name')} placeholder="Ravi Kumar" autoComplete="name" /></label>
       <label>Headline<input value={f.headline} onChange={set('headline')} placeholder="Founder @ SolarCo · Angel investor" /></label>
@@ -319,8 +340,9 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
         <span>Links</span>
         {links.map((l, i) => (
           <div className="link-row" key={i}>
+            <LinkIcon l={l} s={18} />
             <input className="link-label" value={l.label} onChange={setLink(i, 'label')} placeholder="Label" aria-label="Link label" />
-            <input value={l.url} onChange={setLink(i, 'url')} placeholder="linkedin.com/in/you" inputMode="url" aria-label={`${l.label || 'Link'} URL`} />
+            <input value={l.url} onChange={setLink(i, 'url')} placeholder={linkKind(l).hint} inputMode="url" aria-label={`${l.label || 'Link'} URL`} />
             <button type="button" className="circle white press" onClick={() => setLinks(links.filter((_, j) => j !== i))} aria-label="Remove link">
               <Ic n="trash" s={16} />
             </button>
@@ -328,7 +350,9 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
         ))}
         <div className="chips">
           {LINK_PRESETS.map(x => (
-            <button type="button" key={x} className="chip press" onClick={() => setLinks([...links, { label: x, url: '' }])}>+ {x}</button>
+            <button type="button" key={x} className="chip press chip-icon" onClick={() => setLinks(ls => [...ls, { label: x, url: '' }])}>
+              <LinkIcon l={{ label: x, url: '' }} s={15} /> {x}
+            </button>
           ))}
         </div>
       </div>
@@ -801,7 +825,7 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
       }))} />
 
       <div className="two">
-        <PhotoTile label="Selfie with them" icon="camera" capture="user" file={selfie} url={c?.selfie_path ? urls[c.selfie_path] : undefined} onFile={setSelfie} />
+        <PhotoTile crop label="Selfie with them" icon="camera" capture="user" file={selfie} url={c?.selfie_path ? urls[c.selfie_path] : undefined} onFile={setSelfie} />
         <PhotoTile label="Visiting card" icon="card" capture="environment" file={card} url={c?.card_path ? urls[c.card_path] : undefined} onFile={setCard} />
       </div>
 
@@ -852,14 +876,20 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
   )
 }
 
-function PhotoTile({ label, icon, capture, file, url, onFile }: {
-  label: string; icon: string; capture: 'user' | 'environment'; file?: File; url?: string; onFile: (f?: File) => void
+function PhotoTile({ label, icon, capture, file, url, onFile, crop }: {
+  label: string; icon: string; capture: 'user' | 'environment'; file?: File; url?: string; onFile: (f?: File) => void; crop?: boolean
 }) {
   const preview = useMemo(() => (file ? URL.createObjectURL(file) : url), [file, url])
+  const [raw, setRaw] = useState<File>() // picked but not cropped yet
   // `capture` forces the camera on phones, so the gallery gets its own input without it.
-  const pick = (e: { target: HTMLInputElement }) => { onFile(e.target.files?.[0]); e.target.value = '' }
+  const pick = (e: { target: HTMLInputElement }) => {
+    const f = e.target.files?.[0]
+    e.target.value = ''
+    if (f) crop ? setRaw(f) : onFile(f)
+  }
   return (
     <div className="tile">
+      {raw && <Cropper file={raw} onCancel={() => setRaw(undefined)} onDone={f => { setRaw(undefined); onFile(f) }} />}
       {preview ? <img src={preview} alt="" /> : <><Ic n={icon} s={28} /><span>{label}</span></>}
       <div className="tile-actions">
         <label className="tile-btn press" aria-label={`${label}: take photo`}>
@@ -872,6 +902,85 @@ function PhotoTile({ label, icon, capture, file, url, onFile }: {
         </label>
       </div>
     </div>
+  )
+}
+
+// Square crop with a circle guide, so you see exactly how the photo sits in round avatars.
+// Drag to move; pinch, mouse wheel or the slider to zoom. Outputs an 800x800 JPEG.
+const VIEW = 280
+const MAX_ZOOM = 4
+function Cropper({ file, onDone, onCancel }: { file: File; onDone: (f: File) => void; onCancel: () => void }) {
+  const src = useMemo(() => URL.createObjectURL(file), [file])
+  useEffect(() => () => URL.revokeObjectURL(src), [src])
+  const [img, setImg] = useState<HTMLImageElement>()
+  const [zoom, setZoom] = useState(1)
+  const [pos, setPos] = useState({ x: 0, y: 0 }) // image centre offset from frame centre, in screen px
+  const pts = useRef(new Map<number, { x: number; y: number }>())
+  const pinch = useRef<{ d: number; z: number } | null>(null)
+
+  const base = img ? VIEW / Math.min(img.naturalWidth, img.naturalHeight) : 1 // zoom 1 = image just covers the frame
+  const fit = (p: { x: number; y: number }, z: number) => { // never let a gap show inside the frame
+    if (!img) return p
+    const mx = (img.naturalWidth * base * z - VIEW) / 2, my = (img.naturalHeight * base * z - VIEW) / 2
+    return { x: Math.min(mx, Math.max(-mx, p.x)), y: Math.min(my, Math.max(-my, p.y)) }
+  }
+  const zoomTo = (z: number) => {
+    const nz = Math.min(MAX_ZOOM, Math.max(1, z))
+    setZoom(nz)
+    setPos(p => fit(p, nz))
+  }
+  const dist = () => { const [a, b] = [...pts.current.values()]; return Math.hypot(a.x - b.x, a.y - b.y) }
+
+  const save = async () => {
+    if (!img) return
+    const s = base * zoom, size = VIEW / s, OUT = 800
+    const sx = img.naturalWidth / 2 - pos.x / s - size / 2, sy = img.naturalHeight / 2 - pos.y / s - size / 2
+    const cv = document.createElement('canvas')
+    cv.width = cv.height = OUT
+    cv.getContext('2d')!.drawImage(img, sx, sy, size, size, 0, 0, OUT, OUT)
+    const blob = await new Promise<Blob>(r => cv.toBlob(b => r(b!), 'image/jpeg', 0.9))
+    onDone(new File([blob], 'photo.jpg', { type: 'image/jpeg' }))
+  }
+
+  return createPortal(
+    <div className="backdrop crop-backdrop">
+      <div className="bottom-sheet crop-sheet" role="dialog" aria-modal="true" aria-labelledby="crop-title">
+        <h3 id="crop-title">Adjust your photo</h3>
+        <p className="muted small">Drag to move · pinch or slide to zoom</p>
+        <div className="crop-view" style={{ width: VIEW, height: VIEW }}
+          onPointerDown={e => {
+            pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+            try { e.currentTarget.setPointerCapture(e.pointerId) } catch { /* keep dragging without capture */ }
+          }}
+          onPointerMove={e => {
+            const prev = pts.current.get(e.pointerId)
+            if (!prev) return
+            pts.current.set(e.pointerId, { x: e.clientX, y: e.clientY })
+            if (pts.current.size === 1) setPos(p => fit({ x: p.x + e.clientX - prev.x, y: p.y + e.clientY - prev.y }, zoom))
+            else if (pts.current.size === 2) {
+              pinch.current ??= { d: dist(), z: zoom }
+              zoomTo(pinch.current.z * dist() / pinch.current.d)
+            }
+          }}
+          onPointerUp={e => { pts.current.delete(e.pointerId); pinch.current = null }}
+          onPointerCancel={e => { pts.current.delete(e.pointerId); pinch.current = null }}
+          onWheel={e => zoomTo(zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08))}>
+          <img src={src} alt="" draggable={false} onLoad={e => setImg(e.currentTarget)}
+            style={img ? {
+              width: img.naturalWidth * base * zoom, height: img.naturalHeight * base * zoom,
+              transform: `translate(calc(-50% + ${pos.x}px), calc(-50% + ${pos.y}px))`,
+            } : { opacity: 0 }} />
+          <div className="crop-ring" />
+        </div>
+        <input type="range" className="crop-zoom" min={1} max={MAX_ZOOM} step={0.01} value={zoom}
+          onChange={e => zoomTo(+e.target.value)} aria-label="Zoom" />
+        <div className="two">
+          <button type="button" className="btn-ghost press" onClick={onCancel}>Cancel</button>
+          <button type="button" className="btn-black press" onClick={save} disabled={!img}>Use photo</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
