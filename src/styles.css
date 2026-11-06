@@ -292,3 +292,8 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 
 .scan-status { margin: -4px 0 14px; padding: 10px 14px; border-radius: 14px; background: var(--surface); border: 1.5px solid var(--line); font-size: 13px; }
 .scan-status.ok { border-color: #22c55e; }
+
+.remind-card { display: flex; align-items: center; gap: 12px; padding: 14px 14px 14px 12px; margin: -6px 0 22px; border-radius: var(--radius); background: var(--surface); border: 1.5px solid var(--line); animation: rise .4s ease both; }
+.remind-card .circle { background: var(--yellow); }
+.remind-card b { display: block; }
+.remind-card .small { color: var(--muted); }

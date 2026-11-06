@@ -107,6 +107,7 @@ const signIn = async ({ email }: { email: string }) => {
 export const localClient = {
   from,
   rpc,
+  functions: { invoke: async () => ({ data: null, error: new Error("Reminders need Supabase; they don't run in test mode.") }) },
   auth: {
     getSession: async () => ({ data: { session: session() } }),
     onAuthStateChange: (cb: (e: string, s: unknown) => void) => {

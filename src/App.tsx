@@ -6,7 +6,7 @@ import QRCode from 'qrcode'
 import { LOCAL, supabase } from './supabase'
 import { nameFrom } from './voice'
 import { parseCard } from './cardscan'
-import { canPrompt, isIOS, isStandalone, onInstallChange, promptInstall } from './pwa'
+import { canPrompt, isIOS, isStandalone, onInstallChange, promptInstall, pushNeedsInstall, pushSupported, subscribePush } from './pwa'
 
 type Contact = {
   id: string; event_id: string | null; profile_id: string | null; name: string; phone: string | null
@@ -134,6 +134,7 @@ const PATHS: Record<string, ReactNode> = {
   portfolio: <><rect x="3" y="7" width="18" height="13" rx="2.5" /><path d="M8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7M3 12.5h18" /></>,
   globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9M12 3c-2.5 2.6-3.8 5.6-3.8 9s1.3 6.4 3.8 9" /></>,
   gallery: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></>,
+  bell: <path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21a2 2 0 0 0 4 0" />,
   lock: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
 }
 const Ic = ({ n, s = 22 }: { n: string; s?: number }) => (
@@ -452,6 +453,28 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
     } catch { /* share sheet closed */ }
   }
 
+  // "on" = this device gets reminders, "off" = can be turned on, "na" = this browser can't do push
+  const [push, setPush] = useState<'on' | 'off' | 'na'>(pushSupported() ? 'off' : 'na')
+  useEffect(() => {
+    if (!pushSupported() || Notification.permission !== 'granted') return
+    navigator.serviceWorker.ready.then(r => r.pushManager.getSubscription()).then(s => { if (s) setPush('on') })
+  }, [])
+  const enableReminders = async () => {
+    try {
+      const s = await subscribePush(import.meta.env.VITE_VAPID_PUBLIC_KEY)
+      const { error } = await supabase.from('push_subscriptions')
+        .upsert({ endpoint: s.endpoint, p256dh: s.keys.p256dh, auth: s.keys.auth }, { onConflict: 'endpoint' })
+      if (error) throw error
+      setPush('on')
+      flash("🔔 Reminders on. We'll tell you when it's time to call")
+    } catch (e) { alert((e as Error).message) }
+  }
+  const testReminder = async () => {
+    const { data, error } = await supabase.functions.invoke('send-reminders', { body: { test: true } })
+    if (error) return alert(error.message)
+    flash(data?.sent ? 'Test reminder sent 🔔' : 'No device found. Turn reminders on first')
+  }
+
   const contacted = async (c: Contact) => {
     const { error } = await supabase.from('contacts').update({ last_contacted_at: new Date().toISOString() }).eq('id', c.id)
     if (error) return alert(error.message)
@@ -528,6 +551,22 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
               )
             })}
           </div>
+
+          {push === 'off' && (
+            <div className="remind-card">
+              <span className="circle"><Ic n="bell" /></span>
+              <div className="grow">
+                <b>Remind me when it's time to call</b>
+                <span className="small">{pushNeedsInstall()
+                  ? 'On iPhone: tap Share → Add to Home Screen, open the app from there, then turn this on.'
+                  : Notification.permission === 'denied'
+                    ? 'Notifications are blocked for this site. Allow them in your phone or browser settings.'
+                    : 'A notification every morning with who to call.'}</span>
+              </div>
+              {!pushNeedsInstall() && Notification.permission !== 'denied' &&
+                <button className="chip press on" onClick={enableReminders}>Turn on</button>}
+            </div>
+          )}
 
           <div className="section-title">
             <h3>{day === 0 ? 'Call today' : `Call on ${fmt(week[day], { weekday: 'long' })}`}</h3>
@@ -615,6 +654,11 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
                 <button className="press" onClick={share}><span className="circle"><Ic n="share" /></span>Share link</button>
                 <a className="press" href={cardPath(uid)}><span className="circle"><Ic n="arrow" /></span>Preview</a>
                 <button className="press" onClick={() => setModal({ kind: 'editMe' })}><span className="circle"><Ic n="edit" /></span>Edit</button>
+                {push !== 'na' && (
+                  <button className="press" onClick={push === 'on' ? testReminder : enableReminders}>
+                    <span className="circle"><Ic n="bell" /></span>{push === 'on' ? 'Test' : 'Reminders'}
+                  </button>
+                )}
                 {canPrompt() && !isStandalone() && (
                   <button className="press" onClick={promptInstall}><span className="circle"><Ic n="download" /></span>Install</button>
                 )}

@@ -22,3 +22,16 @@ export async function promptInstall() {
   notify()
   return outcome === 'accepted'
 }
+
+// Push reminders. iPhone only allows them for apps added to the Home Screen.
+export const pushSupported = () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window
+export const pushNeedsInstall = () => isIOS && !isStandalone()
+
+export async function subscribePush(publicKey: string) {
+  if ((await Notification.requestPermission()) !== 'granted')
+    throw new Error('Notifications are blocked. Allow them for this site in your phone or browser settings.')
+  const reg = await navigator.serviceWorker.ready
+  const key = Uint8Array.from(atob(publicKey.replace(/-/g, '+').replace(/_/g, '/')), c => c.charCodeAt(0))
+  const sub = (await reg.pushManager.getSubscription()) ?? (await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key }))
+  return sub.toJSON() as { endpoint: string; keys: { p256dh: string; auth: string } }
+}
