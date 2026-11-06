@@ -9,7 +9,7 @@ const store = (d: Record<string, Row[]>) => localStorage.setItem(KEY, JSON.strin
 const uid = () => { const e = localStorage.getItem(KEY + '-user'); return e ? 'local-' + e : null }
 const defaults: Record<string, () => Row> = {
   contacts: () => ({
-    last_contacted_at: new Date().toISOString(), event_id: null, profile_id: null, email: null, company: null, selfie_path: null, card_path: null,
+    last_contacted_at: new Date().toISOString(), event_id: null, profile_id: null, email: null, company: null, hometown: null, current_city: null, selfie_path: null, card_path: null,
     avatar_path: null, lat: null, lng: null, importance: 2, contact_every_days: 30, phone: null, met_where: null, help_note: null,
   }),
   events: () => ({}),
@@ -81,7 +81,8 @@ async function rpc(fn: string, a: Row) {
       const c = d.contacts.find(x => x.user_id === owner.id && x.profile_id === p.id)
       if (c) return c
       const n = newRow('contacts', {
-        user_id: owner.id, profile_id: p.id, name: p.name, phone: p.phone, help_note: p.help_with,
+        user_id: owner.id, profile_id: p.id, name: p.name, phone: p.phone, email: p.email, help_note: p.help_with,
+        hometown: p.hometown, current_city: p.city,
         met_where: 'QR exchange', avatar_path: p.photo_path, lat: a.lat, lng: a.lng,
       })
       d.contacts.push(n)

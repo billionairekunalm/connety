@@ -10,7 +10,7 @@ import { canPrompt, isIOS, isStandalone, onInstallChange, promptInstall, pushNee
 
 type Contact = {
   id: string; event_id: string | null; profile_id: string | null; name: string; phone: string | null
-  email: string | null; company: string | null
+  email: string | null; company: string | null; hometown: string | null; current_city: string | null
   met_where: string | null; help_note: string | null; importance: number
   contact_every_days: number; last_contacted_at: string
   selfie_path: string | null; card_path: string | null; avatar_path: string | null
@@ -20,7 +20,7 @@ type Link = { label: string; url: string }
 type Note = { id: string; contact_id: string; kind: 'call' | 'note'; format: 'note' | 'points'; body: string; created_at: string }
 type Profile = {
   id: string; name: string; headline: string | null; phone: string | null; email: string | null
-  city: string | null; help_with: string | null; photo_path: string | null; links: Link[]
+  city: string | null; hometown: string | null; help_with: string | null; photo_path: string | null; links: Link[]
 }
 type Ev = { id: string; name: string; date: string | null; place: string | null; lat: number | null; lng: number | null }
 type Tab = 'home' | 'people' | 'events' | 'map'
@@ -258,6 +258,17 @@ function saveVcard(p: Profile) {
   a.click()
 }
 
+// "Lives in Mumbai" and "From Nagpur" pills; shows nothing when both are empty.
+function Places({ lives, from }: { lives: string | null; from: string | null }) {
+  if (!lives && !from) return null
+  return (
+    <div className="pills center-row">
+      {lives && <span className="pill"><Ic n="pin" s={14} /> Lives in {lives}</span>}
+      {from && <span className="pill"><Ic n="home" s={14} /> From {from}</span>}
+    </div>
+  )
+}
+
 // The Linktree-style card: what people see when they scan your QR.
 function CardView({ p }: { p: Profile }) {
   const wa = p.phone?.replace(/\D/g, '')
@@ -265,7 +276,7 @@ function CardView({ p }: { p: Profile }) {
     <div className="big-avatar">{p.photo_path ? <img src={pub(p.photo_path)} alt="" /> : p.name[0]?.toUpperCase()}</div>
     <h1 className="center">{p.name}</h1>
     {p.headline && <p className="center headline">{p.headline}</p>}
-    {p.city && <div className="pills center-row"><span className="pill"><Ic n="pin" s={14} /> {p.city}</span></div>}
+    <Places lives={p.city} from={p.hometown} />
     <div className="quick">
       {p.phone && <a className="press" href={`tel:${p.phone}`}><span className="circle"><Ic n="phone" /></span>Call</a>}
       {wa && <a className="press" href={`https://wa.me/${wa}`} target="_blank" rel="noreferrer"><span className="circle"><Ic n="chat" /></span>WhatsApp</a>}
@@ -296,7 +307,7 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
 }) {
   const [f, setF] = useState({
     name: p?.name ?? '', headline: p?.headline ?? '', phone: p?.phone ?? '', email: p?.email ?? email,
-    city: p?.city ?? '', help_with: p?.help_with ?? '',
+    city: p?.city ?? '', hometown: p?.hometown ?? '', help_with: p?.help_with ?? '',
   })
   const [links, setLinks] = useState<Link[]>(p?.links ?? [{ label: 'LinkedIn', url: '' }])
   const [photo, setPhoto] = useState<File>()
@@ -310,7 +321,7 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
     try {
       const row = {
         id: uid, name: f.name.trim(), headline: nn(f.headline), phone: nn(f.phone), email: nn(f.email),
-        city: nn(f.city), help_with: nn(f.help_with),
+        city: nn(f.city), hometown: nn(f.hometown), help_with: nn(f.help_with),
         links: links.filter(l => l.url.trim()).map(l => ({ label: l.label.trim(), url: safeUrl(l.url.trim()) })),
         photo_path: photo ? await upload(uid, photo, 'avatars') : p?.photo_path ?? null,
       }
@@ -335,9 +346,12 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
       <label>Headline<input value={f.headline} onChange={set('headline')} placeholder="Founder @ SolarCo · Angel investor" /></label>
       <div className="two">
         <label>Mobile<input type="tel" value={f.phone} onChange={set('phone')} placeholder="+91…" autoComplete="tel" /></label>
-        <label>City<input value={f.city} onChange={set('city')} placeholder="Mumbai" /></label>
+        <label>Email<input type="email" value={f.email} onChange={set('email')} autoComplete="email" /></label>
       </div>
-      <label>Email<input type="email" value={f.email} onChange={set('email')} autoComplete="email" /></label>
+      <div className="two">
+        <label>Currently living in<input value={f.city} onChange={set('city')} placeholder="Mumbai" autoComplete="address-level2" /></label>
+        <label>Hometown<input value={f.hometown} onChange={set('hometown')} placeholder="Nagpur" /></label>
+      </div>
       <label>I can help with<textarea rows={3} value={f.help_with} onChange={set('help_with')} placeholder="Solar projects, startup fundraising, Pune real estate…" /></label>
 
       <div className="field">
@@ -526,7 +540,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
   const ql = q.toLowerCase()
   const people = contacts.filter(c =>
     (!level || c.importance === level) &&
-    [c.name, c.phone, c.email, c.company, c.met_where, c.help_note, evName(c.event_id)].some(v => v?.toLowerCase().includes(ql)))
+    [c.name, c.phone, c.email, c.company, c.current_city, c.hometown, c.met_where, c.help_note, evName(c.event_id)].some(v => v?.toLowerCase().includes(ql)))
 
   const card = (c: Contact, i: number, swipe = false) => {
     const body = (
@@ -715,6 +729,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
               <div className="big-avatar">{selfie(person) ? <img src={selfie(person)} alt="" /> : person.name[0].toUpperCase()}</div>
               <h1 className="center">{person.name}</h1>
               {person.company && <p className="center headline">{person.company}</p>}
+              <Places lives={person.current_city} from={person.hometown} />
               <div className="pills center-row">
                 <span className="pill dark">{LEVELS[person.importance]}</span>
                 {(person.met_where || evName(person.event_id)) &&
@@ -887,7 +902,7 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
   uid: string; c?: Contact; eventId?: string; events: Ev[]; urls: Record<string, string>; done: (id?: string) => void
 }) {
   const [f, setF] = useState({
-    name: c?.name ?? '', phone: c?.phone ?? '', email: c?.email ?? '', company: c?.company ?? '', met_where: c?.met_where ?? '', help_note: c?.help_note ?? '',
+    name: c?.name ?? '', phone: c?.phone ?? '', email: c?.email ?? '', company: c?.company ?? '', current_city: c?.current_city ?? '', hometown: c?.hometown ?? '', met_where: c?.met_where ?? '', help_note: c?.help_note ?? '',
     importance: c?.importance ?? 2, contact_every_days: c?.contact_every_days ?? 30, event_id: c?.event_id ?? eventId ?? '',
   })
   const [selfie, setSelfie] = useState<File>()
@@ -926,7 +941,7 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
     try {
       const ev = events.find(e => e.id === f.event_id)
       const row = {
-        ...f, event_id: f.event_id || null, phone: f.phone || null, email: nn(f.email), company: nn(f.company),
+        ...f, event_id: f.event_id || null, phone: f.phone || null, email: nn(f.email), company: nn(f.company), current_city: nn(f.current_city), hometown: nn(f.hometown),
         contact_every_days: Math.max(1, +f.contact_every_days || 30),
         lat: loc?.lat ?? ev?.lat ?? null, lng: loc?.lng ?? ev?.lng ?? null,
         ...(selfie && { selfie_path: await upload(uid, selfie) }),
@@ -964,6 +979,10 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
       <div className="two">
         <label>Email<input type="email" value={f.email} onChange={set('email')} placeholder="ravi@solarco.in" /></label>
         <label>Company<input value={f.company} onChange={set('company')} placeholder="SolarCo" /></label>
+      </div>
+      <div className="two">
+        <label>Lives in<input value={f.current_city} onChange={set('current_city')} placeholder="Pune" /></label>
+        <label>Hometown<input value={f.hometown} onChange={set('hometown')} placeholder="Nagpur" /></label>
       </div>
       <label>Event
         <select value={f.event_id} onChange={set('event_id')}>
