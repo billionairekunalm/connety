@@ -110,6 +110,7 @@ const PATHS: Record<string, ReactNode> = {
   share: <><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8" /></>,
   logout: <path d="M15 4h4v16h-4M10 8l-4 4 4 4M6 12h10" />,
   download: <path d="M12 4v11M7 10l5 5 5-5M5 20h14" />,
+  gallery: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></>,
   lock: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
 }
 const Ic = ({ n, s = 22 }: { n: string; s?: number }) => (
@@ -855,11 +856,22 @@ function PhotoTile({ label, icon, capture, file, url, onFile }: {
   label: string; icon: string; capture: 'user' | 'environment'; file?: File; url?: string; onFile: (f?: File) => void
 }) {
   const preview = useMemo(() => (file ? URL.createObjectURL(file) : url), [file, url])
+  // `capture` forces the camera on phones, so the gallery gets its own input without it.
+  const pick = (e: { target: HTMLInputElement }) => { onFile(e.target.files?.[0]); e.target.value = '' }
   return (
-    <label className="tile press">
+    <div className="tile">
       {preview ? <img src={preview} alt="" /> : <><Ic n={icon} s={28} /><span>{label}</span></>}
-      <input type="file" accept="image/*" capture={capture} hidden onChange={e => onFile(e.target.files?.[0])} />
-    </label>
+      <div className="tile-actions">
+        <label className="tile-btn press" aria-label={`${label}: take photo`}>
+          <Ic n="camera" s={16} /> Camera
+          <input type="file" accept="image/*" capture={capture} hidden onChange={pick} />
+        </label>
+        <label className="tile-btn press" aria-label={`${label}: choose from gallery`}>
+          <Ic n="gallery" s={16} /> Gallery
+          <input type="file" accept="image/*" hidden onChange={pick} />
+        </label>
+      </div>
+    </div>
   )
 }
 
