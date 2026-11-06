@@ -289,3 +289,6 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+.scan-status { margin: -4px 0 14px; padding: 10px 14px; border-radius: 14px; background: var(--surface); border: 1.5px solid var(--line); font-size: 13px; }
+.scan-status.ok { border-color: #22c55e; }

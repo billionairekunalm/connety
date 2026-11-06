@@ -5,10 +5,12 @@ import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
 import QRCode from 'qrcode'
 import { LOCAL, supabase } from './supabase'
 import { nameFrom } from './voice'
+import { parseCard } from './cardscan'
 import { canPrompt, isIOS, isStandalone, onInstallChange, promptInstall } from './pwa'
 
 type Contact = {
   id: string; event_id: string | null; profile_id: string | null; name: string; phone: string | null
+  email: string | null; company: string | null
   met_where: string | null; help_note: string | null; importance: number
   contact_every_days: number; last_contacted_at: string
   selfie_path: string | null; card_path: string | null; avatar_path: string | null
@@ -466,7 +468,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
   const ql = q.toLowerCase()
   const people = contacts.filter(c =>
     (!level || c.importance === level) &&
-    [c.name, c.phone, c.met_where, c.help_note, evName(c.event_id)].some(v => v?.toLowerCase().includes(ql)))
+    [c.name, c.phone, c.email, c.company, c.met_where, c.help_note, evName(c.event_id)].some(v => v?.toLowerCase().includes(ql)))
 
   const card = (c: Contact, i: number, swipe = false) => {
     const body = (
@@ -474,7 +476,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
         <Avatar c={c} url={selfie(c)} />
         <div className="grow">
           <b>{c.name}</b>
-          <span className="small">{LEVELS[c.importance]} · {swipe ? dueText(c) : c.met_where || evName(c.event_id) || dueText(c)}</span>
+          <span className="small">{LEVELS[c.importance]} · {swipe ? dueText(c) : c.company || c.met_where || evName(c.event_id) || dueText(c)}</span>
         </div>
         {c.phone && <a className="circle" href={`tel:${c.phone}`} onClick={e => e.stopPropagation()} aria-label={`Call ${c.name}`}><Ic n="phone" s={18} /></a>}
         <span className="circle white"><Ic n="arrow" s={18} /></span>
@@ -632,6 +634,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
             <div className="detail">
               <div className="big-avatar">{selfie(person) ? <img src={selfie(person)} alt="" /> : person.name[0].toUpperCase()}</div>
               <h1 className="center">{person.name}</h1>
+              {person.company && <p className="center headline">{person.company}</p>}
               <div className="pills center-row">
                 <span className="pill dark">{LEVELS[person.importance]}</span>
                 {(person.met_where || evName(person.event_id)) &&
@@ -661,6 +664,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
 
               <div className="quick">
                 <button className="press" onClick={() => contacted(person)}><span className="circle"><Ic n="check" /></span>Contacted</button>
+                {person.email && <a className="press" href={`mailto:${person.email}`}><span className="circle"><Ic n="mail" /></span>Email</a>}
                 {person.phone && <a className="press" href={`https://wa.me/${person.phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer"><span className="circle"><Ic n="chat" /></span>WhatsApp</a>}
                 <button className="press" onClick={async () => {
                   if (!confirm(`Delete ${person.name}?`)) return
@@ -782,11 +786,35 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
   uid: string; c?: Contact; eventId?: string; events: Ev[]; urls: Record<string, string>; done: (id?: string) => void
 }) {
   const [f, setF] = useState({
-    name: c?.name ?? '', phone: c?.phone ?? '', met_where: c?.met_where ?? '', help_note: c?.help_note ?? '',
+    name: c?.name ?? '', phone: c?.phone ?? '', email: c?.email ?? '', company: c?.company ?? '', met_where: c?.met_where ?? '', help_note: c?.help_note ?? '',
     importance: c?.importance ?? 2, contact_every_days: c?.contact_every_days ?? 30, event_id: c?.event_id ?? eventId ?? '',
   })
   const [selfie, setSelfie] = useState<File>()
   const [card, setCard] = useState<File>()
+  const [scan, setScan] = useState('')
+  // Read the visiting card on the phone itself (no upload) and fill only the fields still empty.
+  const scanCard = async (file?: File) => {
+    setCard(file)
+    if (!file) return
+    setScan('Reading card…')
+    try {
+      const T = await import('tesseract.js')
+      const { data } = await (T.default ?? T).recognize(file, 'eng', {
+        logger: m => { if (m.status === 'recognizing text') setScan(`Reading card… ${Math.round(m.progress * 100)}%`) },
+      })
+      const info = parseCard(data.text)
+      const found = (['name', 'phone', 'email', 'company'] as const).filter(k => info[k])
+      setF(p => ({
+        ...p, name: p.name || info.name || '', phone: p.phone || info.phone || '',
+        email: p.email || info.email || '', company: p.company || info.company || '',
+      }))
+      setScan(found.length
+        ? `✓ Filled ${found.join(', ')} from the card. Please check before saving.`
+        : "Couldn't read the card. Try a sharper photo in good light.")
+    } catch {
+      setScan("Couldn't read the card. Check your internet (first scan downloads the reader) and try again.")
+    }
+  }
   const [loc, setLoc] = useState(c?.lat != null ? { lat: c.lat, lng: c.lng! } : null)
   const [busy, setBusy] = useState(false)
   useEffect(() => { if (!c) here().then(setLoc) }, [])
@@ -797,7 +825,7 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
     try {
       const ev = events.find(e => e.id === f.event_id)
       const row = {
-        ...f, event_id: f.event_id || null, phone: f.phone || null,
+        ...f, event_id: f.event_id || null, phone: f.phone || null, email: nn(f.email), company: nn(f.company),
         contact_every_days: Math.max(1, +f.contact_every_days || 30),
         lat: loc?.lat ?? ev?.lat ?? null, lng: loc?.lng ?? ev?.lng ?? null,
         ...(selfie && { selfie_path: await upload(uid, selfie) }),
@@ -826,11 +854,16 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
 
       <div className="two">
         <PhotoTile crop label="Selfie with them" icon="camera" capture="user" file={selfie} url={c?.selfie_path ? urls[c.selfie_path] : undefined} onFile={setSelfie} />
-        <PhotoTile label="Visiting card" icon="card" capture="environment" file={card} url={c?.card_path ? urls[c.card_path] : undefined} onFile={setCard} />
+        <PhotoTile label="Visiting card" icon="card" capture="environment" file={card} url={c?.card_path ? urls[c.card_path] : undefined} onFile={scanCard} />
       </div>
 
       <label>Name *<input required value={f.name} onChange={set('name')} placeholder="Ravi Kumar" /></label>
+      {scan && <p className={`scan-status ${scan.startsWith('✓') ? 'ok' : ''}`} role="status">{scan}</p>}
       <label>Mobile<input type="tel" value={f.phone} onChange={set('phone')} placeholder="+91…" /></label>
+      <div className="two">
+        <label>Email<input type="email" value={f.email} onChange={set('email')} placeholder="ravi@solarco.in" /></label>
+        <label>Company<input value={f.company} onChange={set('company')} placeholder="SolarCo" /></label>
+      </div>
       <label>Event
         <select value={f.event_id} onChange={set('event_id')}>
           <option value="">None</option>

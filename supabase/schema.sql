@@ -32,6 +32,8 @@ create table contacts (
   profile_id uuid references profiles on delete set null, -- set when added by QR exchange
   name text not null,
   phone text,
+  email text,
+  company text,
   met_where text,                 -- free text: "Goa trip", "referred by Ravi", ...
   help_note text,                 -- how they can help now / in future
   importance smallint not null default 2 check (importance between 1 and 4), -- 1 VIMP, 2 IMP, 3 normal, 4 low
