@@ -158,7 +158,8 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 
 .toast {
   position: fixed; top: calc(16px + env(safe-area-inset-top)); left: 50%; transform: translateX(-50%); z-index: 2000;
-  background: #111; color: #fff; padding: 12px 20px; border-radius: 999px; font-weight: 500; white-space: nowrap;
+  background: #111; color: #fff; padding: 12px 20px; border-radius: 999px; font-weight: 500; text-align: center;
+  width: max-content; max-width: calc(100vw - 32px);
   animation: drop .3s ease; box-shadow: 0 10px 24px rgba(0, 0, 0, .25);
 }
 @keyframes drop { from { opacity: 0; transform: translate(-50%, -16px); } }
@@ -297,3 +298,24 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 .remind-card .circle { background: var(--yellow); }
 .remind-card b { display: block; }
 .remind-card .small { color: var(--muted); }
+
+/* after-call note + history */
+.note-sheet { text-align: left; }
+.note-sheet h3 { font-size: 22px; }
+.seg { display: grid; grid-template-columns: 1fr 1fr; padding: 4px; border-radius: 999px; background: var(--bg); margin: 4px 0; }
+.seg button { padding: 10px; border-radius: 999px; font-weight: 600; color: var(--muted); transition: background .2s, color .2s; }
+.seg button.on { background: var(--inv); color: var(--on-inv); }
+.point-list { display: grid; gap: 6px; }
+.point { display: flex; align-items: center; gap: 8px; }
+.point span { font-size: 22px; line-height: 1; color: var(--purple); width: 14px; }
+.point input { padding: 11px 14px; }
+.add-point { justify-self: start; display: inline-flex; align-items: center; gap: 4px; }
+.note-sheet .mic { margin: 2px 0; }
+.hist-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+.hist-head h4 { margin: 0; }
+.hist-head .chip { display: inline-flex; align-items: center; gap: 4px; padding: 6px 12px; }
+.hist-item { padding: 12px 0; border-top: 1.5px solid var(--line); }
+.hist-item:first-of-type { border-top: 0; }
+.hist-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
+.hist-del { margin-left: auto; color: var(--muted); padding: 4px; }
+.points { margin: 0; padding-left: 20px; display: grid; gap: 2px; }

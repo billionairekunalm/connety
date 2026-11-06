@@ -4,7 +4,7 @@
 // ponytail: localStorage caps at ~5 MB (~20 compressed photos); fine for testing, real data goes to Supabase.
 type Row = Record<string, any>
 const KEY = 'connections-local'
-const load = (): Record<string, Row[]> => ({ events: [], contacts: [], profiles: [], ...JSON.parse(localStorage.getItem(KEY) ?? '{}') })
+const load = (): Record<string, Row[]> => ({ events: [], contacts: [], profiles: [], interactions: [], ...JSON.parse(localStorage.getItem(KEY) ?? '{}') })
 const store = (d: Record<string, Row[]>) => localStorage.setItem(KEY, JSON.stringify(d))
 const uid = () => { const e = localStorage.getItem(KEY + '-user'); return e ? 'local-' + e : null }
 const defaults: Record<string, () => Row> = {
@@ -13,6 +13,7 @@ const defaults: Record<string, () => Row> = {
     avatar_path: null, lat: null, lng: null, importance: 2, contact_every_days: 30, phone: null, met_where: null, help_note: null,
   }),
   events: () => ({}),
+  interactions: () => ({ kind: 'call', format: 'note' }),
   profiles: () => ({ links: [] }),
 }
 const newRow = (table: string, r: Row) => ({ id: crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, created_at: new Date().toISOString(), ...defaults[table](), user_id: uid(), ...r })
@@ -39,6 +40,7 @@ function from(table: string) {
       const gone = new Set(d[table].filter(match).map(r => r.id))
       d[table] = d[table].filter(r => !gone.has(r.id))
       if (table === 'events') d.contacts.forEach(c => { if (gone.has(c.event_id)) c.event_id = null }) // on delete set null
+      if (table === 'contacts') d.interactions = d.interactions.filter(n => !gone.has(n.contact_id)) // on delete cascade
     } else {
       out = d[table].filter(match)
       if (order) {

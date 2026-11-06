@@ -17,6 +17,7 @@ type Contact = {
   lat: number | null; lng: number | null
 }
 type Link = { label: string; url: string }
+type Note = { id: string; contact_id: string; kind: 'call' | 'note'; format: 'note' | 'points'; body: string; created_at: string }
 type Profile = {
   id: string; name: string; headline: string | null; phone: string | null; email: string | null
   city: string | null; help_with: string | null; photo_path: string | null; links: Link[]
@@ -413,14 +414,20 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
   useEffect(() => onInstallChange(() => rerender(n => n + 1)), [])
   const flash = (t: string) => { setToast(t); setTimeout(() => setToast(''), 2200) }
 
+  const [notes, setNotes] = useState<Note[]>([])
+  const [noteFor, setNoteFor] = useState<Contact>() // who the "how did the call go?" popup is for
+
+  // ponytail: loads every note up front; fetch per person if someone logs thousands of calls.
   const load = async () => {
-    const [c, e] = await Promise.all([
+    const [c, e, n] = await Promise.all([
       supabase.from('contacts').select('*').order('name'),
       supabase.from('events').select('*').order('date', { ascending: false }),
+      supabase.from('interactions').select('*').order('created_at', { ascending: false }),
     ])
     if (c.error || e.error) return alert((c.error ?? e.error)!.message)
     setContacts(c.data)
     setEvents(e.data)
+    setNotes(n.data ?? [])
     const paths = c.data.flatMap(x => [x.selfie_path, x.card_path]).filter(Boolean) as string[]
     if (paths.length) {
       const { data } = await supabase.storage.from('photos').createSignedUrls(paths, DAY / 1000)
@@ -475,6 +482,34 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
     flash(data?.sent ? 'Test reminder sent 🔔' : 'No device found. Turn reminders on first')
   }
 
+  // Tapping Call opens the phone app; when you come back to this app, ask how the call went.
+  const calling = useRef<{ c: Contact; left: boolean } | null>(null)
+  const startCall = (c: Contact) => { calling.current = { c, left: false } }
+  useEffect(() => {
+    const onVis = () => {
+      const call = calling.current
+      if (!call) return
+      if (document.hidden) call.left = true
+      else if (call.left) { calling.current = null; setNoteFor(call.c) }
+    }
+    document.addEventListener('visibilitychange', onVis)
+    return () => document.removeEventListener('visibilitychange', onVis)
+  }, [])
+
+  const saveNote = async (c: Contact, body: string, format: 'note' | 'points') => {
+    const { error } = await supabase.from('interactions').insert({ contact_id: c.id, kind: 'call', format, body })
+    if (error) return alert(error.message)
+    await supabase.from('contacts').update({ last_contacted_at: new Date().toISOString() }).eq('id', c.id)
+    setNoteFor(undefined)
+    flash(`✓ Saved · next call with ${c.name.split(' ')[0]} in ${c.contact_every_days}d`)
+    load()
+  }
+  const deleteNote = async (n: Note) => {
+    if (!confirm('Delete this note?')) return
+    await supabase.from('interactions').delete().eq('id', n.id)
+    load()
+  }
+
   const contacted = async (c: Contact) => {
     const { error } = await supabase.from('contacts').update({ last_contacted_at: new Date().toISOString() }).eq('id', c.id)
     if (error) return alert(error.message)
@@ -501,7 +536,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
           <b>{c.name}</b>
           <span className="small">{LEVELS[c.importance]} · {swipe ? dueText(c) : c.company || c.met_where || evName(c.event_id) || dueText(c)}</span>
         </div>
-        {c.phone && <a className="circle" href={`tel:${c.phone}`} onClick={e => e.stopPropagation()} aria-label={`Call ${c.name}`}><Ic n="phone" s={18} /></a>}
+        {c.phone && <a className="circle" href={`tel:${c.phone}`} onClick={e => { e.stopPropagation(); startCall(c) }} aria-label={`Call ${c.name}`}><Ic n="phone" s={18} /></a>}
         <span className="circle white"><Ic n="arrow" s={18} /></span>
       </div>
     )
@@ -634,6 +669,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
       </nav>
 
       {toast && <div className="toast">{toast}</div>}
+      {noteFor && <CallNote c={noteFor} onSave={(b, f) => saveNote(noteFor, b, f)} onClose={() => setNoteFor(undefined)} />}
 
       {m && (
         <div className="sheet" style={{ '--c': person ? COLORS[person.importance] : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
@@ -704,6 +740,27 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
                   <h4>Visiting card</h4><img src={urls[person.card_path]} alt="Visiting card" />
                 </a>
               )}
+              <div className="panel">
+                <div className="hist-head">
+                  <h4>What we talked about</h4>
+                  <button className="chip press" onClick={() => setNoteFor(person)}><Ic n="plus" s={14} /> Add note</button>
+                </div>
+                {notes.filter(n => n.contact_id === person.id).map(n => (
+                  <div className="hist-item" key={n.id}>
+                    <div className="hist-meta">
+                      <Ic n={n.kind === 'call' ? 'phone' : 'edit'} s={13} />
+                      {fmt(new Date(n.created_at), { day: 'numeric', month: 'short', year: 'numeric' })} ·{' '}
+                      {new Date(n.created_at).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })}
+                      <button className="hist-del" onClick={() => deleteNote(n)} aria-label="Delete note"><Ic n="trash" s={13} /></button>
+                    </div>
+                    {n.format === 'points'
+                      ? <ul className="points">{n.body.split('\n').map((l, i) => <li key={i}>{l}</li>)}</ul>
+                      : <p className="pre">{n.body}</p>}
+                  </div>
+                ))}
+                {!notes.some(n => n.contact_id === person.id) &&
+                  <p className="muted small">No notes yet. After each call you'll be asked what you talked about.</p>}
+              </div>
               {person.lat != null && <PeopleMap contacts={[person]} events={[]} />}
 
               <div className="quick">
@@ -719,7 +776,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
 
               <div className="cta">
                 {person.phone
-                  ? <a className="btn-black press" href={`tel:${person.phone}`}><Ic n="phone" s={18} /> Call {person.phone}</a>
+                  ? <a className="btn-black press" href={`tel:${person.phone}`} onClick={() => startCall(person)}><Ic n="phone" s={18} /> Call {person.phone}</a>
                   : <button className="btn-black press" onClick={() => setModal({ kind: 'edit', c: person })}>Add a phone number</button>}
               </div>
             </div>
@@ -982,6 +1039,74 @@ function PhotoTile({ label, icon, capture, file, url, onFile, crop }: {
   )
 }
 
+// "How did the call go?" Write it as a note or as bullet points, switch any time, or speak it.
+const toPoints = (t: string) => t.split(/\n+|(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean)
+function CallNote({ c, onSave, onClose }: { c: Contact; onSave: (body: string, format: 'note' | 'points') => void; onClose: () => void }) {
+  const [format, setFormat] = useState<'note' | 'points'>('note')
+  const [text, setText] = useState('')
+  const [points, setPoints] = useState<string[]>([''])
+  const [busy, setBusy] = useState(false)
+  const refs = useRef<(HTMLInputElement | null)[]>([])
+  const focusPoint = (i: number) => setTimeout(() => refs.current[i]?.focus(), 0)
+  const body = format === 'note' ? text.trim() : points.map(p => p.trim()).filter(Boolean).join('\n')
+
+  const switchTo = (f: 'note' | 'points') => {
+    if (f === format) return
+    if (f === 'points') setPoints(toPoints(text).length ? toPoints(text) : [''])
+    else setText(points.map(p => p.trim()).filter(Boolean).join('\n'))
+    setFormat(f)
+  }
+  const setPoint = (i: number, v: string) => setPoints(ps => ps.map((p, j) => (j === i ? v : p)))
+
+  return createPortal(
+    <div className="backdrop" onClick={onClose}>
+      <div className="bottom-sheet note-sheet" role="dialog" aria-modal="true" aria-labelledby="note-title" onClick={e => e.stopPropagation()}>
+        <div className="grabber" />
+        <h3 id="note-title">How did the call with {c.name.split(' ')[0]} go?</h3>
+        <p className="muted small">Write what you talked about so you remember next time.</p>
+
+        <div className="seg" role="tablist">
+          {(['note', 'points'] as const).map(f => (
+            <button key={f} role="tab" aria-selected={format === f} className={format === f ? 'on' : ''} onClick={() => switchTo(f)}>
+              {f === 'note' ? 'Note' : '• Points'}
+            </button>
+          ))}
+        </div>
+
+        {format === 'note'
+          ? <textarea autoFocus rows={5} value={text} onChange={e => setText(e.target.value)}
+              placeholder="Talked about his Dubai expansion, wants an intro to an investor next month…" />
+          : <div className="point-list">
+              {points.map((p, i) => (
+                <div className="point" key={i}>
+                  <span aria-hidden>•</span>
+                  <input ref={el => { refs.current[i] = el }} value={p} autoFocus={i === points.length - 1} placeholder={i ? 'Next point' : 'First point'}
+                    onChange={e => setPoint(i, e.target.value)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') { e.preventDefault(); setPoints(ps => [...ps.slice(0, i + 1), '', ...ps.slice(i + 1)]); focusPoint(i + 1) }
+                      if (e.key === 'Backspace' && !p && points.length > 1) { e.preventDefault(); setPoints(ps => ps.filter((_, j) => j !== i)); focusPoint(i - 1) }
+                    }} />
+                </div>
+              ))}
+              <button className="chip press add-point" onClick={() => { setPoints(ps => [...ps, '']); focusPoint(points.length) }}>
+                <Ic n="plus" s={14} /> Add point
+              </button>
+            </div>}
+
+        <MicButton hint='Say what you talked about' onText={t => format === 'note'
+          ? setText(p => (p ? `${p} ${t}` : t))
+          : setPoints(ps => [...ps.filter(Boolean), ...toPoints(t)])} />
+
+        <div className="two">
+          <button className="btn-ghost press" onClick={onClose}>Skip</button>
+          <button className="btn-black press" disabled={!body || busy} onClick={() => { setBusy(true); onSave(body, format) }}>Save</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
+  )
+}
+
 // Square crop with a circle guide, so you see exactly how the photo sits in round avatars.
 // Drag to move; pinch, mouse wheel or the slider to zoom. Outputs an 800x800 JPEG.
 const VIEW = 280
@@ -1064,7 +1189,7 @@ function Cropper({ file, onDone, onCancel }: { file: File; onDone: (f: File) => 
 // Browser speech-to-text (Chrome, Edge, Safari). Hidden where unsupported, e.g. Firefox.
 const SR = (window as any).SpeechRecognition ?? (window as any).webkitSpeechRecognition
 
-function MicButton({ onText }: { onText: (t: string) => void }) {
+function MicButton({ onText, hint = '"Met Ravi, does solar panels, wants investors"' }: { onText: (t: string) => void; hint?: string }) {
   const rec = useRef<any>(null)
   const [on, setOn] = useState(false)
   if (!SR) return null
@@ -1090,7 +1215,7 @@ function MicButton({ onText }: { onText: (t: string) => void }) {
       <span className="mic-dot"><Ic n="mic" /></span>
       <span>
         <b>{on ? 'Listening… release to stop' : 'Hold to talk'}</b>
-        <small>{on ? 'Say who they are and how they can help' : '"Met Ravi, does solar panels, wants investors"'}</small>
+        <small>{on ? 'Speak now, release when done' : hint}</small>
       </span>
     </button>
   )
