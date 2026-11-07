@@ -40,10 +40,23 @@ type Modal =
   | { kind: 'editMe' }
   | { kind: 'room'; id: string }
   | { kind: 'newRoom' }
+  | { kind: 'settings' }
   | null
 
-const LEVELS = ['', 'VIMP', 'IMP', 'Normal', 'Low']
-const COLORS = ['', '#ff7a6b', '#ffc145', '#a99bff', '#a9c8ff']
+// Your categories (Settings): first = most important. contacts.importance is the 1-based position.
+type Cat = { name: string; color: string }
+const CAT_COLORS = ['#ff7a6b', '#ffc145', '#a99bff', '#a9c8ff', '#c9e27f', '#f7b3e4', '#7dd3c0', '#d4b483']
+const MAX_CATS = 8
+const DEFAULT_CATS: Cat[] = [
+  { name: 'VIMP', color: '#ff7a6b' }, { name: 'IMP', color: '#ffc145' },
+  { name: 'Normal', color: '#a99bff' }, { name: 'Low', color: '#a9c8ff' },
+]
+// ponytail: module-level, set by App before every render so all screens read the same list;
+// pass it down as a prop if components ever start memoizing.
+let CATS: Cat[] = DEFAULT_CATS
+const catIds = () => CATS.map((_, k) => k + 1)
+const catName = (i: number) => CATS[i - 1]?.name ?? CATS[CATS.length - 1].name
+const catColor = (i: number) => CATS[i - 1]?.color ?? '#d4d4d4'
 const TINTS = ['#a99bff', '#ffc145', '#a9c8ff', '#f7b3e4', '#c9e27f']
 const FREQS = [7, 14, 30, 60, 90]
 const LINK_PRESETS = ['LinkedIn', 'Instagram', 'Website', 'X', 'YouTube', 'Portfolio']
@@ -169,6 +182,7 @@ const PATHS: Record<string, ReactNode> = {
   clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
   play: <path d="M8 5v14l11-7z" />,
   stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
+  gear: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>,
   bell: <path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21a2 2 0 0 0 4 0" />,
   lock: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
 }
@@ -181,6 +195,8 @@ export default function App() {
   const [session, setSession] = useState<Session | null>(null)
   const [ready, setReady] = useState(false)
   const [profile, setProfile] = useState<Profile | null>() // undefined = loading, null = not created yet
+  const [cats, setCats] = useState<Cat[]>(DEFAULT_CATS)
+  CATS = cats
   const uid = session?.user.id
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true) })
@@ -190,6 +206,8 @@ export default function App() {
   useEffect(() => {
     setProfile(undefined)
     if (uid) supabase.from('profiles').select('*').eq('id', uid).maybeSingle().then(({ data }) => setProfile(data))
+    if (uid) supabase.from('user_settings').select('*').eq('id', uid).maybeSingle()
+      .then(({ data }) => setCats(data?.categories?.length ? data.categories : DEFAULT_CATS))
   }, [uid])
 
   const pid = new URLSearchParams(location.search).get('u')
@@ -204,7 +222,7 @@ export default function App() {
       <ProfileForm uid={uid} email={session.user.email ?? ''} onboarding done={setProfile} />
     </div>
   )
-  return <Home uid={uid} profile={profile} setProfile={setProfile} />
+  return <Home uid={uid} profile={profile} setProfile={setProfile} cats={cats} setCats={setCats} />
 }
 
 // What someone sees after scanning a QR. Anyone can view the card; saving needs an account.
@@ -391,14 +409,14 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
       </div>
       <label>I can help with<textarea rows={3} value={f.help_with} onChange={set('help_with')} placeholder="Solar projects, startup fundraising, Pune real estate…" /></label>
 
-      <label className={`host-toggle press ${hosts ? 'on' : ''}`}>
+      {onboarding && <label className={`host-toggle press ${hosts ? 'on' : ''}`}>
         <input type="checkbox" checked={hosts} onChange={e => setHosts(e.target.checked)} />
         <span className="tick" aria-hidden><Ic n="check" s={16} /></span>
         <span className="grow">
           <b>I host events</b>
-          <span className="small">Get a "Create a room" option: one QR for your guests to join and meet each other. You can change this any time in Edit card.</span>
+          <span className="small">Get a "Create a room" option: one QR for your guests to join and meet each other. You can change this any time in Settings.</span>
         </span>
-      </label>
+      </label>}
 
       <div className="field">
         <span>Links</span>
@@ -459,7 +477,9 @@ function Login() {
   )
 }
 
-function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; setProfile: (p: Profile) => void }) {
+function Home({ uid, profile, setProfile, cats, setCats }: {
+  uid: string; profile: Profile; setProfile: (p: Profile) => void; cats: Cat[]; setCats: (c: Cat[]) => void
+}) {
   const [tab, setTab] = useState<Tab>('home')
   const [contacts, setContacts] = useState<Contact[]>([])
   const [events, setEvents] = useState<Ev[]>([])
@@ -577,11 +597,6 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
       flash("🔔 Reminders on. We'll tell you when it's time to call")
     } catch (e) { alert((e as Error).message) }
   }
-  const testReminder = async () => {
-    const { data, error } = await supabase.functions.invoke('send-reminders', { body: { test: true } })
-    if (error) return alert(error.message)
-    flash(data?.sent ? 'Test reminder sent 🔔' : 'No device found. Turn reminders on first')
-  }
 
   // Tapping Call opens the phone app; when you come back to this app, ask how the call went.
   const calling = useRef<{ c: Contact; left: boolean } | null>(null)
@@ -643,14 +658,14 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
 
   const card = (c: Contact, i: number, swipe = false) => {
     const body = (
-      <div className={`pcard press ${inGrave(c) ? 'grave' : ''}`} style={{ background: COLORS[c.importance], animationDelay: `${i * 45}ms` }} onClick={() => open(c.id)}>
+      <div className={`pcard press ${inGrave(c) ? 'grave' : ''}`} style={{ background: catColor(c.importance), animationDelay: `${i * 45}ms` }} onClick={() => open(c.id)}>
         <Avatar c={c} url={selfie(c)} />
         <div className="grow">
           <b>{inGrave(c) && '🪦 '}{c.name}</b>
           <span className="small">
             {inGrave(c)
               ? `No contact for ${monthsSince(c)} months`
-              : <>{LEVELS[c.importance]} · {swipe ? dueText(c) : c.company || c.met_where || evName(c.event_id) || dueText(c)}</>}
+              : <>{catName(c.importance)} · {swipe ? dueText(c) : c.company || c.met_where || evName(c.event_id) || dueText(c)}</>}
           </span>
         </div>
         {c.phone && <a className="circle" href={`tel:${c.phone}`} onClick={e => { e.stopPropagation(); startCall(c) }} aria-label={`Call ${c.name}`}><Ic n="phone" s={18} /></a>}
@@ -745,9 +760,9 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
             <input ref={searchRef} type="search" placeholder="Search name, note, event…" value={q} onChange={e => setQ(e.target.value)} />
           </div>
           <div className="chips">
-            {[0, 1, 2, 3, 4].map(l => (
+            {[0, ...catIds()].map(l => (
               <button key={l} className={`chip press ${level === l ? 'on' : ''}`} onClick={() => setLevel(l)}>
-                {l ? LEVELS[l] : 'All'} <small>{(showGrave ? grave : alive).filter(c => !l || c.importance === l).length}</small>
+                {l ? catName(l) : 'All'} <small>{(showGrave ? grave : alive).filter(c => !l || c.importance === l).length}</small>
               </button>
             ))}
           </div>
@@ -837,7 +852,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
       {noteFor && <CallNote c={noteFor} onSave={(b, f, n) => saveNote(noteFor, b, f, n)} onClose={() => setNoteFor(undefined)} />}
 
       {m && (
-        <div className="sheet" style={{ '--c': person ? COLORS[person.importance] : m.kind === 'room' ? '#ffc145' : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
+        <div className="sheet" style={{ '--c': person ? catColor(person.importance) : m.kind === 'room' ? '#ffc145' : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
           <div className="sheet-top">
             <button className="circle white press" onClick={() => setModal(null)} aria-label="Back"><Ic n="back" /></button>
             {person && <button className="circle white press" onClick={() => setModal({ kind: 'edit', c: person })} aria-label="Edit"><Ic n="edit" s={20} /></button>}
@@ -855,11 +870,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
                 <button className="press" onClick={share}><span className="circle"><Ic n="share" /></span>Share link</button>
                 <a className="press" href={cardPath(uid)}><span className="circle"><Ic n="arrow" /></span>Preview</a>
                 <button className="press" onClick={() => setModal({ kind: 'editMe' })}><span className="circle"><Ic n="edit" /></span>Edit</button>
-                {push !== 'na' && (
-                  <button className="press" onClick={push === 'on' ? testReminder : enableReminders}>
-                    <span className="circle"><Ic n="bell" /></span>{push === 'on' ? 'Test' : 'Reminders'}
-                  </button>
-                )}
+                <button className="press" onClick={() => setModal({ kind: 'settings' })}><span className="circle"><Ic n="gear" /></span>Settings</button>
                 {canPrompt() && !isStandalone() && (
                   <button className="press" onClick={promptInstall}><span className="circle"><Ic n="download" /></span>Install</button>
                 )}
@@ -884,7 +895,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
               {person.company && <p className="center headline">{person.company}</p>}
               <Places lives={person.current_city} from={person.hometown} />
               <div className="pills center-row">
-                <span className="pill dark">{LEVELS[person.importance]}</span>
+                <span className="pill dark">{catName(person.importance)}</span>
                 {(person.met_where || evName(person.event_id)) &&
                   <span className="pill"><Ic n="pin" s={14} /> {[person.met_where, evName(person.event_id)].filter(Boolean).join(' · ')}</span>}
               </div>
@@ -994,6 +1005,11 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
 
           {m.kind === 'newEvent' && <EventForm done={() => { load(); flash('Event created ✓'); setModal(null); setTab('events') }} />}
 
+          {m.kind === 'settings' && (
+            <Settings uid={uid} profile={profile} setProfile={setProfile} cats={cats} setCats={setCats} contacts={contacts}
+              push={push} enableReminders={enableReminders} onContactsChanged={load} flash={flash} />
+          )}
+
           {m.kind === 'newRoom' && (
             <RoomForm done={async id => { await load(); flash('🎉 Room created'); setModal({ kind: 'room', id }) }} />
           )}
@@ -1073,7 +1089,7 @@ function PeopleMap({ contacts, events, onOpen, tall }: { contacts: Contact[]; ev
         </CircleMarker>
       ))}
       {contacts.filter(c => c.lat != null).map(c => (
-        <CircleMarker key={c.id} center={[c.lat!, c.lng!]} radius={9} pathOptions={{ color: '#111', weight: 2, fillColor: COLORS[c.importance], fillOpacity: 1 }}>
+        <CircleMarker key={c.id} center={[c.lat!, c.lng!]} radius={9} pathOptions={{ color: '#111', weight: 2, fillColor: catColor(c.importance), fillOpacity: 1 }}>
           <Popup><a href="#" onClick={e => { e.preventDefault(); onOpen?.(c.id) }}>{c.name}</a><br />{c.met_where}</Popup>
         </CircleMarker>
       ))}
@@ -1179,10 +1195,10 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
       <div className="field">
         <span>How important?</span>
         <div className="chips">
-          {[1, 2, 3, 4].map(l => (
+          {catIds().map(l => (
             <button type="button" key={l} className={`chip press ${f.importance === l ? 'on' : ''}`}
-              style={f.importance === l ? { background: COLORS[l], color: '#111', borderColor: '#111' } : undefined}
-              onClick={() => setF({ ...f, importance: l })}>{LEVELS[l]}</button>
+              style={f.importance === l ? { background: catColor(l), color: '#111', borderColor: '#111' } : undefined}
+              onClick={() => setF({ ...f, importance: l })}>{catName(l)}</button>
           ))}
         </div>
       </div>
@@ -1237,6 +1253,116 @@ function PhotoTile({ label, icon, capture, file, url, onFile, crop }: {
           <input type="file" accept="image/*" hidden onChange={pick} />
         </label>
       </div>
+    </div>
+  )
+}
+
+// ---------- Settings ----------
+
+function Settings({ uid, profile, setProfile, cats, setCats, contacts, push, enableReminders, onContactsChanged, flash }: {
+  uid: string; profile: Profile; setProfile: (p: Profile) => void; cats: Cat[]; setCats: (c: Cat[]) => void
+  contacts: Contact[]; push: 'on' | 'off' | 'na'; enableReminders: () => void; onContactsChanged: () => void; flash: (t: string) => void
+}) {
+  const [names, setNames] = useState(cats.map(c => c.name)) // edited locally, saved on blur
+  useEffect(() => setNames(cats.map(c => c.name)), [cats])
+  const [colorFor, setColorFor] = useState<number>() // which row's colour picker is open
+  const count = (i: number) => contacts.filter(c => c.importance === i + 1).length
+
+  const saveCats = async (next: Cat[], msg?: string) => {
+    const { error } = await supabase.from('user_settings').upsert({ id: uid, categories: next, updated_at: new Date().toISOString() })
+    if (error) return alert(error.message)
+    setCats(next)
+    if (msg) flash(msg)
+  }
+  const rename = (i: number, typed: string) => { // read from the box itself, not possibly-stale state
+    const name = typed.trim()
+    if (!name) return setNames(cats.map(c => c.name)) // empty name: put the old one back
+    if (name !== cats[i].name) saveCats(cats.map((c, j) => (j === i ? { ...c, name } : c)), 'Saved ✓')
+  }
+  const add = () => {
+    const used = new Set(cats.map(c => c.color))
+    saveCats([...cats, { name: `Category ${cats.length + 1}`, color: CAT_COLORS.find(c => !used.has(c)) ?? CAT_COLORS[0] }], 'Category added')
+  }
+  // Deleting moves its people to the category above (or the new first one), so nobody loses a category.
+  const remove = async (i: number) => {
+    const k = i + 1, n = count(i)
+    const target = k > 1 ? cats[k - 2].name : cats[1].name
+    if (!confirm(n ? `Delete "${cats[i].name}"? ${n} ${n === 1 ? 'person moves' : 'people move'} to "${target}".` : `Delete "${cats[i].name}"?`)) return
+    if (k > 1) await supabase.from('contacts').update({ importance: k - 1 }).eq('importance', k)
+    for (let j = k + 1; j <= cats.length; j++) await supabase.from('contacts').update({ importance: j - 1 }).eq('importance', j)
+    await saveCats(cats.filter((_, j) => j !== i), 'Category deleted')
+    onContactsChanged()
+  }
+  const setHosts = async (on: boolean) => {
+    const { data, error } = await supabase.from('profiles').update({ hosts_events: on }).eq('id', uid).select().single()
+    if (error) return alert(error.message)
+    setProfile(data)
+    flash(on ? 'Create a room is now in Events' : 'Create a room hidden')
+  }
+
+  return (
+    <div className="detail settings">
+      <h1 className="big">SETTINGS</h1>
+
+      <h3 className="section-label">Events</h3>
+      <label className={`host-toggle press ${profile.hosts_events ? 'on' : ''}`}>
+        <input type="checkbox" checked={!!profile.hosts_events} onChange={e => setHosts(e.target.checked)} />
+        <span className="tick" aria-hidden><Ic n="check" s={16} /></span>
+        <span className="grow">
+          <b>I host events</b>
+          <span className="small">Shows "Create a room" in Events. You can always join other people's rooms either way.</span>
+        </span>
+      </label>
+
+      <h3 className="section-label">Reminders</h3>
+      <div className="setting-row">
+        <span className="circle"><Ic n="bell" /></span>
+        <span className="grow">
+          <b>Daily call reminders</b>
+          <span className="small muted">
+            {push === 'on' ? 'On. Every morning at 9 AM you get who to call.'
+              : push === 'na' ? "This browser can't show notifications."
+              : pushNeedsInstall() ? 'On iPhone, add the app to your Home Screen first.'
+              : Notification.permission === 'denied' ? 'Blocked. Allow notifications for this site in your settings.'
+              : 'Off on this device.'}
+          </span>
+        </span>
+        {push === 'on'
+          ? <span className="rp-tag ok">On</span>
+          : push === 'off' && !pushNeedsInstall() && Notification.permission !== 'denied' &&
+            <button className="chip press on" onClick={enableReminders}>Turn on</button>}
+      </div>
+
+      <h3 className="section-label">Your categories</h3>
+      <p className="muted small cat-intro">Name them however you like, up to {MAX_CATS}. The first one is the most important and gets called first.</p>
+      <div className="cat-list">
+        {cats.map((c, i) => (
+          <div className="cat-row" key={i}>
+            <span className="cat-rank">{i + 1}</span>
+            <button className="cat-swatch press" style={{ background: c.color }} aria-label={`Colour for ${c.name}`}
+              onClick={() => setColorFor(colorFor === i ? undefined : i)} />
+            <input value={names[i] ?? ''} maxLength={20} aria-label={`Category ${i + 1} name`}
+              onChange={e => setNames(ns => ns.map((n, j) => (j === i ? e.target.value : n)))}
+              onBlur={e => rename(i, e.target.value)} onKeyDown={e => { if (e.key === 'Enter') (e.target as HTMLInputElement).blur() }} />
+            <span className="cat-count">{count(i)}</span>
+            {cats.length > 1 && (
+              <button className="circle white press" onClick={() => remove(i)} aria-label={`Delete ${c.name}`}><Ic n="trash" s={15} /></button>
+            )}
+            {colorFor === i && (
+              <div className="cat-colors">
+                {CAT_COLORS.map(col => (
+                  <button key={col} className={`cat-swatch press ${col === c.color ? 'on' : ''}`} style={{ background: col }} aria-label={`Use colour ${col}`}
+                    onClick={() => { setColorFor(undefined); saveCats(cats.map((x, j) => (j === i ? { ...x, color: col } : x)), 'Saved ✓') }} />
+                ))}
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+      {cats.length < MAX_CATS && (
+        <button className="btn-ghost press add-cat" onClick={add}><Ic n="plus" s={18} /> Add category ({cats.length}/{MAX_CATS})</button>
+      )}
+      <div style={{ height: 32 }} />
     </div>
   )
 }
