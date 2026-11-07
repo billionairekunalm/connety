@@ -34,7 +34,14 @@ type Room = {
   organizer_id: string; organizer_name: string | null; member_count: number
 }
 type RoomPerson = { user_id: string; name: string; headline: string | null; city: string | null; photo_path: string | null; is_organizer: boolean }
-type Tab = 'home' | 'people' | 'events' | 'map'
+type Post = {
+  id: string; user_id: string; poster_name: string; poster_photo_path: string | null
+  place: string; note: string | null; starts_at: string; ends_at: string
+  event_id: string | null; event_name: string | null; created_at: string
+  response_count: number; joined: boolean
+}
+type PostPerson = { user_id: string; name: string; photo_path: string | null }
+type Tab = 'home' | 'people' | 'events' | 'posts'
 type Modal =
   | { kind: 'person'; id: string }
   | { kind: 'edit'; c?: Contact; eventId?: string }
@@ -44,6 +51,8 @@ type Modal =
   | { kind: 'editMe' }
   | { kind: 'room'; id: string }
   | { kind: 'newRoom' }
+  | { kind: 'post'; id: string }
+  | { kind: 'newPost' }
   | { kind: 'settings' }
   | null
 
@@ -721,21 +730,24 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
 
   const [notes, setNotes] = useState<Note[]>([])
   const [rooms, setRooms] = useState<Room[]>([])
+  const [posts, setPosts] = useState<Post[]>([])
   const [noteFor, setNoteFor] = useState<Contact>() // who the "how did the call go?" popup is for
 
   // ponytail: loads every note up front; fetch per person if someone logs thousands of calls.
   const load = async () => {
-    const [c, e, n, r] = await Promise.all([
+    const [c, e, n, r, p] = await Promise.all([
       supabase.from('contacts').select('*').order('name'),
       supabase.from('events').select('*').order('date', { ascending: false }),
       supabase.from('interactions').select('*').order('created_at', { ascending: false }),
       supabase.rpc('my_rooms'),
+      supabase.rpc('feed_posts'),
     ])
     if (c.error || e.error) return alert((c.error ?? e.error)!.message)
     setContacts(c.data)
     setEvents(e.data)
     setNotes(n.data ?? [])
     setRooms((r.data as Room[] | null) ?? [])
+    setPosts((p.data as Post[] | null) ?? [])
     const paths = c.data.flatMap(x => [x.selfie_path, x.card_path]).filter(Boolean) as string[]
     if (paths.length) {
       const { data } = await supabase.storage.from('photos').createSignedUrls(paths, DAY / 1000)
@@ -750,7 +762,7 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
     let t: number | undefined
     const refresh = () => { clearTimeout(t); t = window.setTimeout(load, 250) } // one reload per burst
     const ch = supabase.channel(`live:${uid}`)
-    for (const table of ['contacts', 'events', 'interactions', 'rooms'])
+    for (const table of ['contacts', 'events', 'interactions', 'rooms', 'posts'])
       ch.on('postgres_changes' as any, { event: '*', schema: 'public', table }, refresh)
     ch.on('postgres_changes' as any, { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${uid}` },
       (e: { new?: Profile }) => { if (e?.new?.id) setProfile(e.new) })
@@ -903,6 +915,7 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
   const person = m?.kind === 'person' ? contacts.find(c => c.id === m.id) : undefined
   const event = m?.kind === 'event' ? events.find(e => e.id === m.id) : undefined
   const eventPeople = event ? contacts.filter(c => c.event_id === event.id) : []
+  const post = m?.kind === 'post' ? posts.find(p => p.id === m.id) : undefined
   const name = profile.name.split(' ')[0]
 
   return (
@@ -1055,18 +1068,45 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
           </div>
         </>}
 
-        {tab === 'map' && <>
-          <h1 className="big">WHO I MET<br />WHERE</h1>
-          <PeopleMap contacts={contacts} events={events} onOpen={open} tall />
+        {tab === 'posts' && <>
+          <h1 className="big">WHO'S<br />AROUND</h1>
+          <section className="rooms-hero press" onClick={() => setModal({ kind: 'newPost' })}>
+            <span className="tag">📍 Meetup posts</span>
+            <h2>Going<br />somewhere?</h2>
+            <p>Post where you'll be. Connections who are free can tap "I'm in" and you meet up offline.</p>
+            <span className="hero-btn"><Ic n="plus" s={18} /> New post</span>
+            <i className="shape s1" /><i className="shape s2" />
+          </section>
+          {posts.length
+            ? <div className="room-list">
+                {posts.map((p, i) => (
+                  <button key={p.id} className="room-card press" style={{ animationDelay: `${i * 45}ms` }}
+                    onClick={() => setModal({ kind: 'post', id: p.id })}>
+                    <span className="status">
+                      {fmt(new Date(p.starts_at), { day: 'numeric', month: 'short' })}
+                      {p.ends_at !== p.starts_at && `–${fmt(new Date(p.ends_at), { day: 'numeric', month: 'short' })}`}
+                    </span>
+                    <b>{p.place}</b>
+                    <span className="small">
+                      {p.user_id === uid ? 'Your post' : p.poster_name}{p.event_name && ` · ${p.event_name}`}
+                    </span>
+                    <span className="room-meta">
+                      <span><Ic n="people" s={14} /> {p.response_count} in</span>
+                      {p.joined && <span className="host-tag">You're in</span>}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            : <div className="empty-card">No posts yet. Post your next trip and see who's free to meet up.</div>}
         </>}
       </main>
 
       <nav className="dock">
-        {(['home', 'people', 'add', 'events', 'map'] as const).map(t =>
+        {(['home', 'people', 'add', 'events', 'posts'] as const).map(t =>
           t === 'add'
             ? <button key={t} className="add press" onClick={() => setModal({ kind: 'edit' })} aria-label="Add person"><Ic n="plus" s={26} /></button>
             : <button key={t} className={`press ${tab === t ? 'on' : ''}`} onClick={() => setTab(t)} aria-label={t}>
-                <Ic n={{ home: 'home', people: 'people', events: 'calendar', map: 'map' }[t]} />
+                <Ic n={{ home: 'home', people: 'people', events: 'calendar', posts: 'pin' }[t]} />
                 {t === 'home' && today.length > 0 && <i className="badge">{today.length}</i>}
               </button>,
         )}
@@ -1076,7 +1116,7 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
       {noteFor && <CallNote c={noteFor} onSave={(b, f, n) => saveNote(noteFor, b, f, n)} onClose={() => setNoteFor(undefined)} />}
 
       {m && (
-        <div className="sheet" style={{ '--c': person ? catColor(person.importance) : m.kind === 'room' ? '#ffc145' : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
+        <div className="sheet" style={{ '--c': person ? catColor(person.importance) : m.kind === 'room' ? '#ffc145' : m.kind === 'post' ? '#c9e27f' : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
           <div className="sheet-top">
             <button className="circle white press" onClick={() => setModal(null)} aria-label="Back"><Ic n="back" /></button>
             {person && <button className="circle white press" onClick={() => setModal({ kind: 'edit', c: person })} aria-label="Edit"><Ic n="edit" s={20} /></button>}
@@ -1247,6 +1287,15 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
                 onOpen={open} onShowMyQr={() => setModal({ kind: 'me' })} onChanged={load} onDeleted={() => { setModal(null); load() }} flash={flash} />
             )
           })()}
+
+          {m.kind === 'newPost' && (
+            <PostForm events={events} done={async id => { await load(); flash('Posted ✓'); setModal({ kind: 'post', id }) }} />
+          )}
+
+          {m.kind === 'post' && (post
+            ? <PostView post={post} uid={uid} contacts={contacts}
+                onOpen={open} onChanged={load} onDeleted={() => { setModal(null); load() }} flash={flash} />
+            : <div className="detail"><div className="empty-card">Post not found.</div></div>)}
         </div>
       )}
     </div>
@@ -1826,9 +1875,139 @@ function RoomJoin({ rid }: { rid: string }) {
   )
 }
 
+// ---------- Meetup posts ----------
+
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+// Nobody but the poster can read post_responses rows they don't own, so "someone joined" travels as a
+// content-free ping (same trick as pingRoom) — whoever's viewing the post then re-asks post_people().
+const pingPost = (id: string) => {
+  const ch = supabase.channel(`post:${id}`)
+  ch.subscribe(status => {
+    if (status === 'SUBSCRIBED') ch.send({ type: 'broadcast', event: 'ping', payload: {} }).finally(() => supabase.removeChannel(ch))
+  })
+}
+
+function PostForm({ events, done }: { events: Ev[]; done: (id: string) => void }) {
+  const today = isoDay(new Date())
+  const [f, setF] = useState({ place: '', note: '', starts_at: today, ends_at: today, event_id: '' })
+  const [busy, setBusy] = useState(false)
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
+
+  const save = async () => {
+    if (f.ends_at < f.starts_at) return alert('The end date must be on or after the start date.')
+    setBusy(true)
+    try {
+      const { data, error } = await supabase.from('posts').insert({
+        place: f.place.trim(), note: nn(f.note), starts_at: f.starts_at, ends_at: f.ends_at, event_id: f.event_id || null,
+      }).select().single()
+      if (error) throw error
+      done(data.id)
+    } catch (e) { alert((e as Error).message); setBusy(false) }
+  }
+
+  return (
+    <form className="detail" onSubmit={e => { e.preventDefault(); save() }}>
+      <h1 className="big">WHO'S<br />AROUND?</h1>
+      <p className="muted intro">Post where you'll be. Connections who are free can tap "I'm in" and you meet up offline.</p>
+      <label>Place *<input required autoFocus value={f.place} onChange={set('place')} placeholder="Bangalore" /></label>
+      <div className="two">
+        <label>From<input type="date" required value={f.starts_at} onChange={set('starts_at')} /></label>
+        <label>To<input type="date" required min={f.starts_at} value={f.ends_at} onChange={set('ends_at')} /></label>
+      </div>
+      <label>Event
+        <select value={f.event_id} onChange={set('event_id')}>
+          <option value="">None</option>
+          {events.map(e => <option key={e.id} value={e.id}>{e.name}</option>)}
+        </select>
+      </label>
+      <label>Note<textarea rows={3} value={f.note} onChange={set('note')} placeholder="Free evenings, let's grab coffee!" /></label>
+      <div className="cta"><button className="btn-black press" disabled={busy}>{busy ? 'Posting…' : 'Post it'}</button></div>
+    </form>
+  )
+}
+
+function PostView({ post, uid, contacts, onOpen, onChanged, onDeleted, flash }: {
+  post: Post; uid: string; contacts: Contact[]
+  onOpen: (contactId: string) => void; onChanged: () => void; onDeleted: () => void; flash: (t: string) => void
+}) {
+  const [people, setPeople] = useState<PostPerson[]>()
+  const mine = post.user_id === uid
+  const postCh = useRef<ReturnType<typeof supabase.channel>>()
+
+  useEffect(() => {
+    const get = () => supabase.rpc('post_people', { pid: post.id }).then(({ data }) => setPeople((data as PostPerson[] | null) ?? []))
+    get()
+    const ch = supabase.channel(`post:${post.id}`)
+    ch.on('broadcast', { event: 'ping' }, get).subscribe()
+    postCh.current = ch
+    return () => { supabase.removeChannel(ch) }
+  }, [post.id])
+
+  const join = async () => {
+    const { error } = await supabase.from('post_responses').insert({ post_id: post.id })
+    if (error) return alert(error.message)
+    pingPost(post.id); flash("You're in 🎉"); onChanged()
+  }
+  const leave = async () => {
+    await supabase.from('post_responses').delete().eq('post_id', post.id)
+    pingPost(post.id); onChanged()
+  }
+  const contactFor = (p: PostPerson) => contacts.find(c => c.profile_id === p.user_id)
+  const others = people ?? []
+
+  return (
+    <div className="detail room">
+      <h1 className="big">{post.place}</h1>
+      <div className="pills">
+        <span className="pill dark">
+          <Ic n="calendar" s={13} /> {fmt(new Date(post.starts_at), { day: 'numeric', month: 'short' })}
+          {post.ends_at !== post.starts_at && `–${fmt(new Date(post.ends_at), { day: 'numeric', month: 'short' })}`}
+        </span>
+        {!mine && <span className="pill">Posted by {post.poster_name}</span>}
+        {post.event_name && <span className="pill"><Ic n="pin" s={13} /> {post.event_name}</span>}
+        <span className="pill"><Ic n="people" s={13} /> {post.response_count} {post.response_count === 1 ? 'person' : 'people'} in</span>
+      </div>
+      {post.note && <div className="panel"><p className="pre">{post.note}</p></div>}
+
+      <div className="quick">
+        {mine
+          ? <button className="press" onClick={async () => {
+              if (!confirm('Cancel this post?')) return
+              await supabase.from('posts').delete().eq('id', post.id); onDeleted()
+            }}><span className="circle"><Ic n="trash" /></span>Cancel</button>
+          : <button className="press" onClick={post.joined ? leave : join}>
+              <span className="circle"><Ic n={post.joined ? 'check' : 'plus'} /></span>{post.joined ? "You're in" : "I'm in"}
+            </button>}
+      </div>
+
+      <div className="section-title">
+        <h3>Who's in</h3>
+        <span className="muted small">{others.length} {others.length === 1 ? 'person' : 'people'}</span>
+      </div>
+      {people === undefined
+        ? <div className="empty-card">Loading…</div>
+        : others.length === 0
+          ? <div className="empty-card">Nobody yet. Share this with your connections!</div>
+          : <div className="room-people">
+              {others.map((p, i) => {
+                const c = contactFor(p)
+                return (
+                  <button key={p.user_id} className={`room-person press ${c ? 'connected' : ''}`} style={{ animationDelay: `${i * 40}ms` }}
+                    onClick={() => c && onOpen(c.id)}>
+                    <span className="rp-photo">{p.photo_path ? <img src={pub(p.photo_path)} alt="" /> : p.name[0]?.toUpperCase()}</span>
+                    <b>{p.name}</b>
+                    {c && <span className="rp-tag ok">✓ Connected</span>}
+                  </button>
+                )
+              })}
+            </div>}
+    </div>
+  )
+}
+
 // "How did the call go?" Write it as a note or as bullet points, switch any time, or speak it.
 const toPoints = (t: string) => t.split(/\n+|(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean)
-const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const inDays = (n: number) => isoDay(new Date(Date.now() + n * DAY))
 function CallNote({ c, onSave, onClose }: {
   c: Contact; onSave: (body: string, format: 'note' | 'points', next: Date) => void; onClose: () => void

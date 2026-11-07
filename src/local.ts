@@ -4,7 +4,7 @@
 // ponytail: localStorage caps at ~5 MB (~20 compressed photos); fine for testing, real data goes to Supabase.
 type Row = Record<string, any>
 const KEY = 'connections-local'
-const load = (): Record<string, Row[]> => ({ events: [], contacts: [], profiles: [], interactions: [], rooms: [], room_members: [], user_settings: [], ...JSON.parse(localStorage.getItem(KEY) ?? '{}') })
+const load = (): Record<string, Row[]> => ({ events: [], contacts: [], profiles: [], interactions: [], rooms: [], room_members: [], posts: [], post_responses: [], user_settings: [], ...JSON.parse(localStorage.getItem(KEY) ?? '{}') })
 const store = (d: Record<string, Row[]>) => localStorage.setItem(KEY, JSON.stringify(d))
 const uid = () => { const e = localStorage.getItem(KEY + '-user'); return e ? 'local-' + e : null }
 const defaults: Record<string, () => Row> = {
@@ -17,6 +17,8 @@ const defaults: Record<string, () => Row> = {
   profiles: () => ({ links: [] }),
   user_settings: () => ({}),
   rooms: () => ({ organizer_id: uid(), place: null, description: null, lat: null, lng: null }),
+  posts: () => ({ note: null, event_id: null }),
+  post_responses: () => ({}),
 }
 const newRow = (table: string, r: Row) => ({ id: crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, created_at: new Date().toISOString(), ...defaults[table](), user_id: uid(), ...r })
 
@@ -43,6 +45,7 @@ function from(table: string) {
       d[table] = d[table].filter(r => !gone.has(r.id))
       if (table === 'events') d.contacts.forEach(c => { if (gone.has(c.event_id)) c.event_id = null }) // on delete set null
       if (table === 'contacts') d.interactions = d.interactions.filter(n => !gone.has(n.contact_id)) // on delete cascade
+      if (table === 'posts') d.post_responses = d.post_responses.filter(r => !gone.has(r.post_id)) // on delete cascade
     } else {
       out = d[table].filter(match)
       if (order) {
@@ -141,6 +144,30 @@ async function rpc(fn: string, a: Row) {
     const people = d.room_members.filter(m => m.room_id === r.id && m.user_id !== uid())
       .map(m => d.profiles.find(p => p.id === m.user_id)).filter(Boolean)
       .map(p => ({ user_id: p!.id, name: p!.name, headline: p!.headline ?? null, city: p!.city ?? null, photo_path: p!.photo_path ?? null, is_organizer: p!.id === r.organizer_id }))
+    return { data: people, error: null }
+  }
+  // A post is visible to its poster and to any mutual connection (a contact row pointing at their profile).
+  const connectionOf = (posterId: string) => posterId === uid() || d.contacts.some(c => c.user_id === uid() && c.profile_id === posterId)
+  if (fn === 'feed_posts') {
+    const today = new Date().toISOString().slice(0, 10)
+    const rows = d.posts.filter(p => connectionOf(p.user_id) && p.ends_at >= today)
+      .sort((a, b) => String(a.starts_at).localeCompare(String(b.starts_at)))
+      .map(p => ({
+        ...p,
+        poster_name: d.profiles.find(pr => pr.id === p.user_id)?.name ?? '',
+        poster_photo_path: d.profiles.find(pr => pr.id === p.user_id)?.photo_path ?? null,
+        event_name: d.events.find(e => e.id === p.event_id)?.name ?? null,
+        response_count: d.post_responses.filter(r => r.post_id === p.id).length,
+        joined: d.post_responses.some(r => r.post_id === p.id && r.user_id === uid()),
+      }))
+    return { data: rows, error: null }
+  }
+  if (fn === 'post_people') {
+    const p = d.posts.find(x => x.id === a.pid)
+    if (!p || !connectionOf(p.user_id)) return { data: [], error: null }
+    const people = d.post_responses.filter(r => r.post_id === a.pid)
+      .map(r => d.profiles.find(pr => pr.id === r.user_id)).filter(Boolean)
+      .map(pr => ({ user_id: pr!.id, name: pr!.name, photo_path: pr!.photo_path ?? null }))
     return { data: people, error: null }
   }
   return { data: null, error: new Error(`Unknown function ${fn}`) }
