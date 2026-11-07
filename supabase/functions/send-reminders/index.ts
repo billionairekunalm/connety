@@ -27,14 +27,16 @@ Deno.serve(async req => {
   webpush.setVapidDetails(Deno.env.get('VAPID_SUBJECT')!, Deno.env.get('VAPID_PUBLIC_KEY')!, Deno.env.get('VAPID_PRIVATE_KEY')!)
 
   let subsQ = db.from('push_subscriptions').select('*')
-  let contactsQ = db.from('contacts').select('user_id, name, importance, last_contacted_at, contact_every_days')
+  let contactsQ = db.from('contacts').select('user_id, name, importance, last_contacted_at, contact_every_days, next_call_at')
   if (onlyUser) { subsQ = subsQ.eq('user_id', onlyUser); contactsQ = contactsQ.eq('user_id', onlyUser) }
   const [{ data: subs }, { data: contacts }] = await Promise.all([subsQ, contactsQ])
 
   const due = new Map<string, { name: string; importance: number }[]>()
   for (const c of contacts ?? []) {
     const last = new Date(c.last_contacted_at).getTime()
-    if (last + c.contact_every_days * DAY > Date.now()) continue
+    // A date picked after a call wins; otherwise "call every X days". Same rule as the app.
+    const due = c.next_call_at ? new Date(c.next_call_at).getTime() : last + c.contact_every_days * DAY
+    if (due > Date.now()) continue
     if (Date.now() - last > GRAVE_DAYS * DAY) continue // in the graveyard: no daily nagging, matches the app
     due.set(c.user_id, [...(due.get(c.user_id) ?? []), c])
   }

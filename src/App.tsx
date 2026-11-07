@@ -11,6 +11,7 @@ import { canPrompt, isIOS, isStandalone, onInstallChange, promptInstall, pushNee
 type Contact = {
   id: string; event_id: string | null; profile_id: string | null; name: string; phone: string | null
   email: string | null; company: string | null; hometown: string | null; current_city: string | null
+  next_call_at: string | null // a date picked after a call; overrides "call every X days"
   met_where: string | null; help_note: string | null; importance: number
   contact_every_days: number; last_contacted_at: string
   selfie_path: string | null; card_path: string | null; avatar_path: string | null
@@ -69,15 +70,19 @@ const cardUrl = (id: string) => publicOrigin + cardPath(id)
 const uuid = () => crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 const nn = (s: string) => s.trim() || null
 const DAY = 864e5
-const dueIn = (c: Contact) =>
-  Math.ceil((new Date(c.last_contacted_at).getTime() + c.contact_every_days * DAY - Date.now()) / DAY)
+const dueAt = (c: Contact) =>
+  c.next_call_at ? new Date(c.next_call_at).getTime() : new Date(c.last_contacted_at).getTime() + c.contact_every_days * DAY
+const startOfDay = (t: number) => new Date(t).setHours(0, 0, 0, 0)
+// Calendar days until the call: "in 2 weeks" reads 14, whatever the time of day.
+const dueIn = (c: Contact) => Math.round((startOfDay(dueAt(c)) - startOfDay(Date.now())) / DAY)
 const bucket = (c: Contact) => Math.max(0, dueIn(c)) // overdue counts as today
 // Relationship health: 0 = just talked, 1 = cold (twice their call gap with no contact).
 // After 6 months with no contact someone goes to the graveyard until you call them again.
 const GRAVE_DAYS = 180
 const daysSince = (c: Contact) => (Date.now() - new Date(c.last_contacted_at).getTime()) / DAY
 const inGrave = (c: Contact) => daysSince(c) > GRAVE_DAYS
-const health = (c: Contact) => Math.min(1, daysSince(c) / (c.contact_every_days * 2))
+const gapDays = (c: Contact) => Math.max(1, (dueAt(c) - new Date(c.last_contacted_at).getTime()) / DAY)
+const health = (c: Contact) => Math.min(1, daysSince(c) / (gapDays(c) * 2))
 const healthColor = (c: Contact) => (inGrave(c) ? '#8b8b8b' : `hsl(${Math.round(135 * (1 - health(c)))} 72% 42%)`)
 const healthLabel = (c: Contact) => (inGrave(c) ? 'In the graveyard' : health(c) < 0.35 ? 'Strong' : health(c) < 0.7 ? 'Fading' : 'Cold')
 const monthsSince = (c: Contact) => Math.floor(daysSince(c) / 30)
@@ -520,12 +525,16 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
     return () => document.removeEventListener('visibilitychange', onVis)
   }, [])
 
-  const saveNote = async (c: Contact, body: string, format: 'note' | 'points') => {
-    const { error } = await supabase.from('interactions').insert({ contact_id: c.id, kind: 'call', format, body })
+  const saveNote = async (c: Contact, body: string, format: 'note' | 'points', next: Date) => {
+    if (body) {
+      const { error } = await supabase.from('interactions').insert({ contact_id: c.id, kind: 'call', format, body })
+      if (error) return alert(error.message)
+    }
+    const { error } = await supabase.from('contacts')
+      .update({ last_contacted_at: new Date().toISOString(), next_call_at: next.toISOString() }).eq('id', c.id)
     if (error) return alert(error.message)
-    await supabase.from('contacts').update({ last_contacted_at: new Date().toISOString() }).eq('id', c.id)
     setNoteFor(undefined)
-    flash(`✓ Saved · next call with ${c.name.split(' ')[0]} in ${c.contact_every_days}d`)
+    flash(`✓ Next call with ${c.name.split(' ')[0]}: ${fmt(next, { weekday: 'short', day: 'numeric', month: 'short' })}`)
     load()
   }
   const deleteNote = async (n: Note) => {
@@ -535,7 +544,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
   }
 
   const contacted = async (c: Contact) => {
-    const { error } = await supabase.from('contacts').update({ last_contacted_at: new Date().toISOString() }).eq('id', c.id)
+    const { error } = await supabase.from('contacts').update({ last_contacted_at: new Date().toISOString(), next_call_at: null }).eq('id', c.id)
     if (error) return alert(error.message)
     flash(`✓ ${c.name} done · next call in ${c.contact_every_days}d`)
     load()
@@ -711,7 +720,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
       </nav>
 
       {toast && <div className="toast">{toast}</div>}
-      {noteFor && <CallNote c={noteFor} onSave={(b, f) => saveNote(noteFor, b, f)} onClose={() => setNoteFor(undefined)} />}
+      {noteFor && <CallNote c={noteFor} onSave={(b, f, n) => saveNote(noteFor, b, f, n)} onClose={() => setNoteFor(undefined)} />}
 
       {m && (
         <div className="sheet" style={{ '--c': person ? COLORS[person.importance] : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
@@ -766,7 +775,9 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
                   <span className="pill"><Ic n="pin" s={14} /> {[person.met_where, evName(person.event_id)].filter(Boolean).join(' · ')}</span>}
               </div>
               <div className="pills center-row">
-                <span className="pill">Every {person.contact_every_days}d</span>
+                {person.next_call_at
+                  ? <span className="pill dark"><Ic n="calendar" s={13} /> Next call {fmt(new Date(person.next_call_at), { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+                  : <span className="pill">Every {person.contact_every_days}d</span>}
                 <span className="pill">Last {ago(person.last_contacted_at)}d ago</span>
                 <span className={`pill ${dueIn(person) <= 0 ? 'red' : ''}`}>{dueText(person)}</span>
               </div>
@@ -1101,7 +1112,13 @@ function PhotoTile({ label, icon, capture, file, url, onFile, crop }: {
 
 // "How did the call go?" Write it as a note or as bullet points, switch any time, or speak it.
 const toPoints = (t: string) => t.split(/\n+|(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean)
-function CallNote({ c, onSave, onClose }: { c: Contact; onSave: (body: string, format: 'note' | 'points') => void; onClose: () => void }) {
+const NEXT_OPTIONS: [string, number][] = [['3 days', 3], ['1 week', 7], ['2 weeks', 14], ['1 month', 30], ['3 months', 90]]
+const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+const inDays = (n: number) => isoDay(new Date(Date.now() + n * DAY))
+function CallNote({ c, onSave, onClose }: {
+  c: Contact; onSave: (body: string, format: 'note' | 'points', next: Date) => void; onClose: () => void
+}) {
+  const [next, setNext] = useState(inDays(c.contact_every_days)) // starts at their usual gap
   const [format, setFormat] = useState<'note' | 'points'>('note')
   const [text, setText] = useState('')
   const [points, setPoints] = useState<string[]>([''])
@@ -1157,9 +1174,28 @@ function CallNote({ c, onSave, onClose }: { c: Contact; onSave: (body: string, f
           ? setText(p => (p ? `${p} ${t}` : t))
           : setPoints(ps => [...ps.filter(Boolean), ...toPoints(t)])} />
 
+        <div className="next-call">
+          <div className="next-head">
+            <b><Ic n="calendar" s={16} /> When to call next?</b>
+            <span className="muted small">{fmt(new Date(`${next}T09:00`), { weekday: 'short', day: 'numeric', month: 'short' })}</span>
+          </div>
+          <div className="chips">
+            {NEXT_OPTIONS.map(([label, n]) => (
+              <button key={n} className={`chip press ${next === inDays(n) ? 'on' : ''}`} onClick={() => setNext(inDays(n))}>
+                {label}{n === c.contact_every_days && ' (usual)'}
+              </button>
+            ))}
+            <input type="date" className="chip-input date" value={next} min={inDays(1)} aria-label="Pick a date"
+              onChange={e => e.target.value && setNext(e.target.value)} />
+          </div>
+        </div>
+
         <div className="two">
           <button className="btn-ghost press" onClick={onClose}>Skip</button>
-          <button className="btn-black press" disabled={!body || busy} onClick={() => { setBusy(true); onSave(body, format) }}>Save</button>
+          <button className="btn-black press" disabled={busy}
+            onClick={() => { setBusy(true); onSave(body, format, new Date(`${next}T09:00`)) }}>
+            {body ? 'Save' : 'Just schedule'}
+          </button>
         </div>
       </div>
     </div>,

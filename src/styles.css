@@ -338,3 +338,10 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
   background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 120' preserveAspectRatio='none'%3E%3Cg fill='none' stroke='%23262626' stroke-width='1.6' stroke-linejoin='round'%3E%3Cpath d='M0 38l48 10 30-14 36 22 34-12 44 24 28-14 40 6'/%3E%3Cpath d='M114 56l10 30-12 34M192 68l16 28 -6 24M78 34l-6-34'/%3E%3Cpath d='M300 0l8 26-18 24 26 22-6 48M308 26l36 10 22-14M290 50l-30 8'/%3E%3C/g%3E%3C/svg%3E") center / 100% 100% no-repeat;
 }
 .pcard.grave > * { position: relative; z-index: 1; } /* text above the cracks */
+
+/* next call picker in the after-call popup */
+.next-call { background: var(--bg); border-radius: 20px; padding: 12px 14px 2px; }
+.next-head { display: flex; justify-content: space-between; align-items: center; }
+.next-head b { display: inline-flex; align-items: center; gap: 6px; }
+.next-call .chips { margin: 10px 0 10px; }
+.chip-input.date { width: auto; min-width: 140px; }
