@@ -319,3 +319,22 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 .hist-meta { display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); margin-bottom: 4px; }
 .hist-del { margin-left: auto; color: var(--muted); padding: 4px; }
 .points { margin: 0; padding-left: 20px; display: grid; gap: 2px; }
+
+/* relationship health + graveyard */
+.people-seg { margin: -6px 0 14px; }
+.people-seg small { opacity: .6; margin-left: 4px; }
+.grave-intro { margin: -4px 0 12px; }
+.health { background: var(--surface); border-radius: 20px; padding: 12px 16px 14px; margin: 4px 0 10px; }
+.health-top { display: flex; justify-content: space-between; font-size: 13px; color: var(--muted); margin-bottom: 8px; }
+.health-bar { position: relative; height: 8px; border-radius: 4px; background: linear-gradient(90deg, hsl(135 72% 42%), hsl(60 85% 48%), hsl(0 72% 50%)); }
+.health-bar i { position: absolute; top: 50%; width: 18px; height: 18px; border-radius: 50%; border: 3px solid var(--surface); transform: translate(-50%, -50%); box-shadow: 0 1px 4px rgba(0, 0, 0, .3); }
+.grave-banner { display: grid; gap: 2px; padding: 14px 16px; margin: 4px 0 10px; border-radius: 20px; background: #6b7280; color: #f3f4f6; font-size: 13px; }
+.grave-banner b { font-size: 15px; }
+.big-avatar.grave, .pcard.grave .avatar { filter: grayscale(1); }
+/* graveyard card: grey stone with cracks */
+.pcard.grave { background: #a3a3a3 !important; color: #262626; filter: saturate(0); overflow: hidden; }
+.pcard.grave::after {
+  content: ''; position: absolute; inset: 0; border-radius: inherit; pointer-events: none; opacity: .5;
+  background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 400 120' preserveAspectRatio='none'%3E%3Cg fill='none' stroke='%23262626' stroke-width='1.6' stroke-linejoin='round'%3E%3Cpath d='M0 38l48 10 30-14 36 22 34-12 44 24 28-14 40 6'/%3E%3Cpath d='M114 56l10 30-12 34M192 68l16 28 -6 24M78 34l-6-34'/%3E%3Cpath d='M300 0l8 26-18 24 26 22-6 48M308 26l36 10 22-14M290 50l-30 8'/%3E%3C/g%3E%3C/svg%3E") center / 100% 100% no-repeat;
+}
+.pcard.grave > * { position: relative; z-index: 1; } /* text above the cracks */

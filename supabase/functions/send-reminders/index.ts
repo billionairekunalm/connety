@@ -6,6 +6,7 @@ import webpush from 'npm:web-push@3.6.7'
 import { createClient } from 'npm:@supabase/supabase-js@2.45.4'
 
 const DAY = 864e5
+const GRAVE_DAYS = 180 // same as the app
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -32,7 +33,9 @@ Deno.serve(async req => {
 
   const due = new Map<string, { name: string; importance: number }[]>()
   for (const c of contacts ?? []) {
-    if (new Date(c.last_contacted_at).getTime() + c.contact_every_days * DAY > Date.now()) continue
+    const last = new Date(c.last_contacted_at).getTime()
+    if (last + c.contact_every_days * DAY > Date.now()) continue
+    if (Date.now() - last > GRAVE_DAYS * DAY) continue // in the graveyard: no daily nagging, matches the app
     due.set(c.user_id, [...(due.get(c.user_id) ?? []), c])
   }
 

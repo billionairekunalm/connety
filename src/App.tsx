@@ -72,6 +72,15 @@ const DAY = 864e5
 const dueIn = (c: Contact) =>
   Math.ceil((new Date(c.last_contacted_at).getTime() + c.contact_every_days * DAY - Date.now()) / DAY)
 const bucket = (c: Contact) => Math.max(0, dueIn(c)) // overdue counts as today
+// Relationship health: 0 = just talked, 1 = cold (twice their call gap with no contact).
+// After 6 months with no contact someone goes to the graveyard until you call them again.
+const GRAVE_DAYS = 180
+const daysSince = (c: Contact) => (Date.now() - new Date(c.last_contacted_at).getTime()) / DAY
+const inGrave = (c: Contact) => daysSince(c) > GRAVE_DAYS
+const health = (c: Contact) => Math.min(1, daysSince(c) / (c.contact_every_days * 2))
+const healthColor = (c: Contact) => (inGrave(c) ? '#8b8b8b' : `hsl(${Math.round(135 * (1 - health(c)))} 72% 42%)`)
+const healthLabel = (c: Contact) => (inGrave(c) ? 'In the graveyard' : health(c) < 0.35 ? 'Strong' : health(c) < 0.7 ? 'Fading' : 'Cold')
+const monthsSince = (c: Contact) => Math.floor(daysSince(c) / 30)
 const dueText = (c: Contact) => {
   const d = dueIn(c)
   return d < 0 ? `${-d}d overdue` : d === 0 ? 'due today' : `call in ${d}d`
@@ -421,6 +430,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
   const [modal, setModal] = useState<Modal>(null)
   const [q, setQ] = useState('')
   const [level, setLevel] = useState(0)
+  const [showGrave, setShowGrave] = useState(false)
   const [day, setDay] = useState(0)
   const [toast, setToast] = useState('')
   const searchRef = useRef<HTMLInputElement>(null)
@@ -535,20 +545,27 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
   const selfie = (c: Contact) => (c.selfie_path ? urls[c.selfie_path] : pub(c.avatar_path))
   const evName = (id: string | null) => events.find(e => e.id === id)?.name
   const week = [...Array(7)].map((_, i) => new Date(Date.now() + i * DAY))
-  const today = contacts.filter(c => bucket(c) === 0)
-  const dayPeople = contacts.filter(c => bucket(c) === day).sort((a, b) => a.importance - b.importance || dueIn(a) - dueIn(b))
+  // The graveyard sits apart: not in Today's calls or the main list until revived with a call.
+  const alive = contacts.filter(c => !inGrave(c))
+  const grave = contacts.filter(inGrave)
+  const today = alive.filter(c => bucket(c) === 0)
+  const dayPeople = alive.filter(c => bucket(c) === day).sort((a, b) => a.importance - b.importance || dueIn(a) - dueIn(b))
   const ql = q.toLowerCase()
-  const people = contacts.filter(c =>
+  const people = (showGrave ? grave : alive).filter(c =>
     (!level || c.importance === level) &&
     [c.name, c.phone, c.email, c.company, c.current_city, c.hometown, c.met_where, c.help_note, evName(c.event_id)].some(v => v?.toLowerCase().includes(ql)))
 
   const card = (c: Contact, i: number, swipe = false) => {
     const body = (
-      <div className="pcard press" style={{ background: COLORS[c.importance], animationDelay: `${i * 45}ms` }} onClick={() => open(c.id)}>
+      <div className={`pcard press ${inGrave(c) ? 'grave' : ''}`} style={{ background: COLORS[c.importance], animationDelay: `${i * 45}ms` }} onClick={() => open(c.id)}>
         <Avatar c={c} url={selfie(c)} />
         <div className="grow">
-          <b>{c.name}</b>
-          <span className="small">{LEVELS[c.importance]} · {swipe ? dueText(c) : c.company || c.met_where || evName(c.event_id) || dueText(c)}</span>
+          <b>{inGrave(c) && '🪦 '}{c.name}</b>
+          <span className="small">
+            {inGrave(c)
+              ? `No contact for ${monthsSince(c)} months`
+              : <>{LEVELS[c.importance]} · {swipe ? dueText(c) : c.company || c.met_where || evName(c.event_id) || dueText(c)}</>}
+          </span>
         </div>
         {c.phone && <a className="circle" href={`tel:${c.phone}`} onClick={e => { e.stopPropagation(); startCall(c) }} aria-label={`Call ${c.name}`}><Ic n="phone" s={18} /></a>}
         <span className="circle white"><Ic n="arrow" s={18} /></span>
@@ -590,7 +607,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
 
           <div className="week">
             {week.map((d, i) => {
-              const n = contacts.filter(c => bucket(c) === i).length
+              const n = alive.filter(c => bucket(c) === i).length
               return (
                 <button key={i} className={`day press ${day === i ? 'on' : ''}`} onClick={() => setDay(i)}>
                   <i className={n ? 'dot' : 'dot off'} />
@@ -627,7 +644,16 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
         </>}
 
         {tab === 'people' && <>
-          <h1 className="big">YOUR<br />PEOPLE</h1>
+          <h1 className="big">{showGrave ? <>THE<br />GRAVEYARD</> : <>YOUR<br />PEOPLE</>}</h1>
+          <div className="seg people-seg" role="tablist">
+            <button role="tab" aria-selected={!showGrave} className={showGrave ? '' : 'on'} onClick={() => setShowGrave(false)}>
+              People <small>{alive.length}</small>
+            </button>
+            <button role="tab" aria-selected={showGrave} className={showGrave ? 'on' : ''} onClick={() => setShowGrave(true)}>
+              🪦 Graveyard <small>{grave.length}</small>
+            </button>
+          </div>
+          {showGrave && <p className="muted small grave-intro">No contact for over 6 months. Call them or tap Contacted to bring them back to life.</p>}
           <div className="search">
             <Ic n="search" s={18} />
             <input ref={searchRef} type="search" placeholder="Search name, note, event…" value={q} onChange={e => setQ(e.target.value)} />
@@ -635,13 +661,15 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
           <div className="chips">
             {[0, 1, 2, 3, 4].map(l => (
               <button key={l} className={`chip press ${level === l ? 'on' : ''}`} onClick={() => setLevel(l)}>
-                {l ? LEVELS[l] : 'All'} <small>{l ? contacts.filter(c => c.importance === l).length : contacts.length}</small>
+                {l ? LEVELS[l] : 'All'} <small>{(showGrave ? grave : alive).filter(c => !l || c.importance === l).length}</small>
               </button>
             ))}
           </div>
           {people.length
             ? <div className="stack">{people.map((c, i) => card(c, i))}</div>
-            : <div className="empty-card">{contacts.length ? 'No match.' : 'No people yet. Tap + to add someone.'}</div>}
+            : <div className="empty-card">{showGrave
+                ? (grave.length ? 'No match.' : 'The graveyard is empty. You keep in touch with everyone 🌱')
+                : contacts.length ? 'No match.' : 'No people yet. Tap + to add someone.'}</div>}
         </>}
 
         {tab === 'events' && <>
@@ -726,7 +754,9 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
 
           {person && (
             <div className="detail">
-              <div className="big-avatar">{selfie(person) ? <img src={selfie(person)} alt="" /> : person.name[0].toUpperCase()}</div>
+              <div className={`big-avatar ${inGrave(person) ? 'grave' : ''}`} style={{ boxShadow: `0 0 0 5px ${healthColor(person)}, 0 10px 30px rgba(0, 0, 0, .15)` }}>
+                {selfie(person) ? <img src={selfie(person)} alt="" /> : person.name[0].toUpperCase()}
+              </div>
               <h1 className="center">{person.name}</h1>
               {person.company && <p className="center headline">{person.company}</p>}
               <Places lives={person.current_city} from={person.hometown} />
@@ -740,6 +770,15 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
                 <span className="pill">Last {ago(person.last_contacted_at)}d ago</span>
                 <span className={`pill ${dueIn(person) <= 0 ? 'red' : ''}`}>{dueText(person)}</span>
               </div>
+              {inGrave(person)
+                ? <div className="grave-banner">
+                    <b>🪦 In the graveyard</b>
+                    <span>No contact for {monthsSince(person)} months. Call {person.name.split(' ')[0]} or tap Contacted to bring them back.</span>
+                  </div>
+                : <div className="health" aria-label={`Relationship health: ${healthLabel(person)}`}>
+                    <div className="health-top"><span>Relationship health</span><b style={{ color: healthColor(person) }}>{healthLabel(person)}</b></div>
+                    <div className="health-bar"><i style={{ left: `${health(person) * 100}%`, background: healthColor(person) }} /></div>
+                  </div>}
               {person.profile_id && (
                 <div className="pills center-row">
                   <a className="pill dark press" href={cardPath(person.profile_id)}><Ic n="card" s={14} /> View their card</a>
@@ -862,10 +901,12 @@ function Swipe({ onDone, children }: { onDone: () => void; children: ReactNode }
   )
 }
 
+// The coloured ring around the photo is relationship health: green → yellow → red, grey in the graveyard.
 function Avatar({ c, url }: { c: Contact; url?: string }) {
+  const ring = { boxShadow: `0 0 0 3px ${healthColor(c)}` }
   return url
-    ? <img className="avatar" src={url} alt="" />
-    : <div className="avatar">{c.name.slice(0, 1).toUpperCase()}</div>
+    ? <img className="avatar" src={url} alt="" style={ring} title={healthLabel(c)} />
+    : <div className="avatar" style={ring} title={healthLabel(c)}>{c.name.slice(0, 1).toUpperCase()}</div>
 }
 
 function Faces({ people, urls }: { people: Contact[]; urls: Record<string, string> }) {
