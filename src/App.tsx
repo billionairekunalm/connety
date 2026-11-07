@@ -186,6 +186,8 @@ const PATHS: Record<string, ReactNode> = {
   play: <path d="M8 5v14l11-7z" />,
   stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
   gear: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>,
+  eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,
+  eyeoff: <path d="M3 3l18 18M10.6 5.1A9.8 9.8 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2" />,
   bell: <path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21a2 2 0 0 0 4 0" />,
   lock: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
 }
@@ -199,12 +201,16 @@ export default function App() {
   const [ready, setReady] = useState(false)
   const [profile, setProfile] = useState<Profile | null>() // undefined = loading, null = not created yet
   const [cats, setCats] = useState<Cat[]>(DEFAULT_CATS)
+  const [recovering, setRecovering] = useState(false)
   MY_COUNTRY = profile?.country ?? guessCountry()
   CATS = cats
   const uid = session?.user.id
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => { setSession(data.session); setReady(true) })
-    const { data } = supabase.auth.onAuthStateChange((_e, s) => setSession(s))
+    const { data } = supabase.auth.onAuthStateChange((e, s) => {
+      setSession(s)
+      if (e === 'PASSWORD_RECOVERY') setRecovering(true) // opened the reset link from the email
+    })
     return () => data.subscription.unsubscribe()
   }, [])
   useEffect(() => {
@@ -219,11 +225,13 @@ export default function App() {
   if (!ready) return null
   if (pid) return <PublicCard pid={pid} mine={pid === uid} loggedIn={!!uid} />
   if (rid) return <RoomJoin rid={rid} />
+  if (recovering && session) return <NewPassword done={() => setRecovering(false)} />
   if (!session || !uid) return <Login />
   if (profile === undefined) return null
   if (!profile) return (
     <div className="app">
-      <ProfileForm uid={uid} email={session.user.email ?? ''} onboarding done={setProfile} />
+      <ProfileForm uid={uid} email={session.user.email ?? ''} onboarding done={setProfile}
+        defaultName={session.user.user_metadata?.full_name ?? session.user.user_metadata?.name ?? ''} />
     </div>
   )
   return <Home uid={uid} profile={profile} setProfile={setProfile} cats={cats} setCats={setCats} />
@@ -369,11 +377,11 @@ function QR({ text }: { text: string }) {
   return src ? <img className="qr" src={src} alt="QR code for your card" /> : <div className="qr" />
 }
 
-function ProfileForm({ uid, email, p, onboarding, done }: {
-  uid: string; email: string; p?: Profile; onboarding?: boolean; done: (p: Profile) => void
+function ProfileForm({ uid, email, p, onboarding, done, defaultName = '' }: {
+  uid: string; email: string; p?: Profile; onboarding?: boolean; done: (p: Profile) => void; defaultName?: string
 }) {
   const [f, setF] = useState({
-    name: p?.name ?? '', headline: p?.headline ?? '', phone: splitNumber(p?.phone, p?.country ?? guessCountry()).national, email: p?.email ?? email,
+    name: p?.name ?? defaultName, headline: p?.headline ?? '', phone: splitNumber(p?.phone, p?.country ?? guessCountry()).national, email: p?.email ?? email,
     city: p?.city ?? '', hometown: p?.hometown ?? '', help_with: p?.help_with ?? '',
   })
   const [links, setLinks] = useState<Link[]>(p?.links ?? [{ label: 'LinkedIn', url: '' }])
@@ -470,32 +478,193 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
   )
 }
 
+// Supabase's messages are technical; say what happened and what to do next.
+function friendlyAuthError(m: string): { text: string; resend?: boolean; switchTo?: 'signin' | 'signup' } {
+  const s = m.toLowerCase()
+  if (s.includes('invalid login credentials')) return { text: 'Wrong email or password. Try again, or reset your password.' }
+  if (s.includes('email not confirmed')) return { text: 'Please confirm your email first. Check your inbox (and spam).', resend: true }
+  if (s.includes('already registered') || s.includes('already exists')) return { text: 'An account with this email already exists. Sign in instead.', switchTo: 'signin' }
+  if (s.includes('password should be') || s.includes('weak')) return { text: 'Choose a stronger password: at least 8 characters, mixing letters and numbers.' }
+  if (s.includes('rate limit') || s.includes('too many') || s.includes('security purposes')) return { text: 'Too many tries. Wait a minute and try again.' }
+  if (s.includes('provider is not enabled')) return { text: 'Google sign-in is not available right now. Use email instead.' }
+  if (s.includes('network') || s.includes('failed to fetch')) return { text: 'No internet connection. Check it and try again.' }
+  if (s.includes('access_denied') || s.includes('cancel')) return { text: 'Google sign-in was cancelled.' }
+  return { text: m }
+}
+
+const GoogleIcon = () => (
+  <svg viewBox="0 0 48 48" width={20} height={20} aria-hidden>
+    <path fill="#FFC107" d="M43.6 20.1H42V20H24v8h11.3C33.7 32.7 29.2 36 24 36c-6.6 0-12-5.4-12-12s5.4-12 12-12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 12.9 4 4 12.9 4 24s8.9 20 20 20 20-8.9 20-20c0-1.3-.1-2.6-.4-3.9z" />
+    <path fill="#FF3D00" d="M6.3 14.7l6.6 4.8C14.7 15.1 19 12 24 12c3.1 0 5.8 1.2 7.9 3.1l5.7-5.7C34 6.1 29.3 4 24 4 16.3 4 9.7 8.3 6.3 14.7z" />
+    <path fill="#4CAF50" d="M24 44c5.2 0 9.9-2 13.4-5.2l-6.2-5.2C29.2 35.1 26.7 36 24 36c-5.2 0-9.6-3.3-11.3-7.9l-6.5 5C9.5 39.6 16.2 44 24 44z" />
+    <path fill="#1976D2" d="M43.6 20.1H42V20H24v8h11.3c-.8 2.2-2.2 4.2-4.1 5.6l6.2 5.2C37 39.2 44 34 44 24c0-1.3-.1-2.6-.4-3.9z" />
+  </svg>
+)
+
 function Login() {
+  const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin')
+  const [name, setName] = useState('')
   const [email, setEmail] = useState('')
   const [password, setPassword] = useState('')
-  const [msg, setMsg] = useState('')
-  const go = async (signup: boolean) => {
-    setMsg('')
-    const { data, error } = signup
-      ? await supabase.auth.signUp({ email, password, options: { emailRedirectTo: location.origin } })
-      : await supabase.auth.signInWithPassword({ email, password })
-    if (error) setMsg(error.message)
-    else if (signup && !data.session) setMsg('Check your email to confirm, then sign in.')
+  const [show, setShow] = useState(false)
+  const [touched, setTouched] = useState<Record<string, boolean>>({})
+  const [busy, setBusy] = useState<'' | 'email' | 'google'>('')
+  const [err, setErr] = useState<ReturnType<typeof friendlyAuthError> | null>(null)
+  const [info, setInfo] = useState('')
+
+  // Errors Google/Supabase send back in the URL after a failed redirect (e.g. cancelled).
+  useEffect(() => {
+    const q = new URLSearchParams(location.search + '&' + location.hash.slice(1))
+    const e = q.get('error_description') || q.get('error')
+    if (e) { setErr(friendlyAuthError(e)); history.replaceState(null, '', location.pathname) }
+  }, [])
+
+  const emailOk = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim())
+  const pwMin = mode === 'signup' ? 8 : 6
+  const errors = {
+    name: mode === 'signup' && !name.trim() ? 'Enter your name' : '',
+    email: !email.trim() ? 'Enter your email' : !emailOk ? "That doesn't look like an email" : '',
+    password: mode === 'forgot' ? '' : password.length < pwMin ? `At least ${pwMin} characters` : '',
   }
+  const valid = !errors.name && !errors.email && !errors.password
+  const switchMode = (m: typeof mode) => { setMode(m); setErr(null); setInfo(''); setTouched({}) }
+
+  const submit = async () => {
+    setTouched({ name: true, email: true, password: true })
+    if (!valid) return
+    setBusy('email'); setErr(null); setInfo('')
+    const redirectTo = location.origin
+    try {
+      if (mode === 'forgot') {
+        const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo })
+        if (error) throw error
+        setInfo(`If ${email.trim()} has an account, a reset link is on its way. Open it on this device.`)
+      } else if (mode === 'signup') {
+        const { data, error } = await supabase.auth.signUp({
+          email: email.trim(), password, options: { emailRedirectTo: redirectTo, data: { full_name: name.trim() } },
+        })
+        if (error) throw error
+        // Supabase hides "already registered" behind a user with no identities.
+        if (data.user && data.user.identities?.length === 0) return setErr(friendlyAuthError('already registered'))
+        if (!data.session) setInfo(`Almost done! We sent a confirmation link to ${email.trim()}. Open it, then you're in.`)
+      } else {
+        const { error } = await supabase.auth.signInWithPassword({ email: email.trim(), password })
+        if (error) throw error
+      }
+    } catch (e) {
+      setErr(friendlyAuthError((e as Error).message))
+    } finally {
+      setBusy('')
+    }
+  }
+  const google = async () => {
+    setBusy('google'); setErr(null)
+    const { error } = await supabase.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin } })
+    if (error) { setErr(friendlyAuthError(error.message)); setBusy('') } // on success the page leaves for Google
+  }
+  const resend = async () => {
+    const { error } = await supabase.auth.resend({ type: 'signup', email: email.trim(), options: { emailRedirectTo: location.origin } })
+    if (error) setErr(friendlyAuthError(error.message))
+    else { setErr(null); setInfo(`Sent again to ${email.trim()}.`) }
+  }
+  const fieldErr = (k: keyof typeof errors) => touched[k] && errors[k] ? <span className="field-err">{errors[k]}</span> : null
+
   return (
-    <form className="login" onSubmit={e => { e.preventDefault(); go(false) }}>
+    <form className="login" noValidate onSubmit={e => { e.preventDefault(); submit() }}>
       <section className="hero">
         <h2>Never lose<br />a person<br />you met.</h2>
         <p>Selfie, card, notes & reminders.</p>
         <i className="shape s1" /><i className="shape s2" /><i className="shape s3" />
       </section>
-      <h1 className="big">STAY IN<br />TOUCH.</h1>
-      <input type="email" placeholder="Email" required autoComplete="email" value={email} onChange={e => setEmail(e.target.value)} />
-      <input type="password" placeholder="Password (min 6)" required minLength={6} autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />
-      <button className="btn-black press">Sign in</button>
-      <button type="button" className="btn-ghost press" onClick={() => go(true)}>Create account</button>
-      {msg && <p className="msg">{msg}</p>}
+
+      {mode === 'forgot'
+        ? <h1 className="big">RESET<br />PASSWORD</h1>
+        : <div className="seg auth-tabs" role="tablist">
+            <button type="button" role="tab" aria-selected={mode === 'signin'} className={mode === 'signin' ? 'on' : ''} onClick={() => switchMode('signin')}>Sign in</button>
+            <button type="button" role="tab" aria-selected={mode === 'signup'} className={mode === 'signup' ? 'on' : ''} onClick={() => switchMode('signup')}>Create account</button>
+          </div>}
+
+      {mode !== 'forgot' && (
+        <>
+          <button type="button" className="btn-google press" onClick={google} disabled={!!busy}>
+            {busy === 'google' ? <span className="spin" aria-hidden /> : <GoogleIcon />} Continue with Google
+          </button>
+          <div className="or"><span>or with email</span></div>
+        </>
+      )}
+
+      {mode === 'signup' && (
+        <label className="auth-field">Full name
+          <input value={name} onChange={e => setName(e.target.value)} onBlur={() => setTouched(t => ({ ...t, name: true }))}
+            autoComplete="name" placeholder="Ravi Kumar" aria-invalid={!!(touched.name && errors.name)} />
+          {fieldErr('name')}
+        </label>
+      )}
+      <label className="auth-field">Email
+        <input type="email" inputMode="email" value={email} onChange={e => setEmail(e.target.value)} onBlur={() => setTouched(t => ({ ...t, email: true }))}
+          autoComplete="email" placeholder="you@example.com" aria-invalid={!!(touched.email && errors.email)} />
+        {fieldErr('email')}
+      </label>
+      {mode !== 'forgot' && (
+        <label className="auth-field">Password
+          <span className="pw">
+            <input type={show ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
+              onBlur={() => setTouched(t => ({ ...t, password: true }))} placeholder={mode === 'signup' ? 'At least 8 characters' : 'Your password'}
+              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} aria-invalid={!!(touched.password && errors.password)} />
+            <button type="button" className="pw-eye" onClick={() => setShow(v => !v)} aria-label={show ? 'Hide password' : 'Show password'}>
+              <Ic n={show ? 'eyeoff' : 'eye'} s={20} />
+            </button>
+          </span>
+          {fieldErr('password')}
+        </label>
+      )}
+      {mode === 'signin' && <button type="button" className="link-btn" onClick={() => switchMode('forgot')}>Forgot password?</button>}
+
+      <button className="btn-black press" disabled={!!busy}>
+        {busy === 'email' && <span className="spin light" aria-hidden />}
+        {mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Send reset link'}
+      </button>
+      {mode === 'forgot' && <button type="button" className="btn-ghost press" onClick={() => switchMode('signin')}>Back to sign in</button>}
+
+      {err && (
+        <p className="msg" role="alert">
+          {err.text}{' '}
+          {err.resend && <button type="button" className="link-btn inline" onClick={resend}>Resend email</button>}
+          {err.switchTo && <button type="button" className="link-btn inline" onClick={() => switchMode(err.switchTo!)}>Sign in</button>}
+        </p>
+      )}
+      {info && <p className="auth-info" role="status">{info}</p>}
       {LOCAL && <p className="muted small center">Local test mode: any email/password works, data stays in this browser.</p>}
+    </form>
+  )
+}
+
+// Opened from the reset email: choose a new password.
+function NewPassword({ done }: { done: () => void }) {
+  const [password, setPassword] = useState('')
+  const [show, setShow] = useState(false)
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const save = async () => {
+    if (password.length < 8) return setErr('At least 8 characters')
+    setBusy(true); setErr('')
+    const { error } = await supabase.auth.updateUser({ password })
+    setBusy(false)
+    if (error) return setErr(friendlyAuthError(error.message).text)
+    done()
+  }
+  return (
+    <form className="login" onSubmit={e => { e.preventDefault(); save() }}>
+      <h1 className="big">NEW<br />PASSWORD</h1>
+      <p className="muted">Choose a new password for your account.</p>
+      <label className="auth-field">New password
+        <span className="pw">
+          <input autoFocus type={show ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)} autoComplete="new-password" placeholder="At least 8 characters" />
+          <button type="button" className="pw-eye" onClick={() => setShow(v => !v)} aria-label={show ? 'Hide password' : 'Show password'}><Ic n={show ? 'eyeoff' : 'eye'} s={20} /></button>
+        </span>
+        {err && <span className="field-err">{err}</span>}
+      </label>
+      <button className="btn-black press" disabled={busy}>{busy && <span className="spin light" aria-hidden />} Save password</button>
     </form>
   )
 }

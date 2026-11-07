@@ -149,7 +149,7 @@ async function rpc(fn: string, a: Row) {
 let listeners: ((e: string, s: unknown) => void)[] = []
 const session = () => {
   const email = localStorage.getItem(KEY + '-user')
-  return email ? { user: { id: uid(), email } } : null
+  return email ? { user: { id: uid(), email, user_metadata: { full_name: localStorage.getItem(KEY + '-name:' + email) ?? undefined } } } : null
 }
 const signIn = async ({ email }: { email: string }) => {
   localStorage.setItem(KEY + '-user', email.trim().toLowerCase())
@@ -186,7 +186,14 @@ export const localClient = {
       return { data: { subscription: { unsubscribe: () => { listeners = listeners.filter(l => l !== cb) } } } }
     },
     signInWithPassword: signIn,
-    signUp: signIn,
+    signUp: async (a: { email: string; options?: { data?: { full_name?: string } } }) => {
+      if (a.options?.data?.full_name) localStorage.setItem(KEY + '-name:' + a.email.trim().toLowerCase(), a.options.data.full_name)
+      return signIn(a)
+    },
+    signInWithOAuth: async () => ({ data: null, error: new Error('Google sign-in needs Supabase; use email in test mode.') }),
+    resetPasswordForEmail: async () => ({ data: {}, error: null }),
+    resend: async () => ({ data: {}, error: null }),
+    updateUser: async () => ({ data: { user: session()?.user }, error: null }),
     signOut: async () => {
       localStorage.removeItem(KEY + '-user')
       listeners.forEach(l => l('SIGNED_OUT', null))

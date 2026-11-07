@@ -11,4 +11,4 @@ export const LOCAL = missing && !import.meta.env.PROD
 export const MISCONFIGURED = missing && import.meta.env.PROD
 export const supabase = missing
   ? (localClient as unknown as ReturnType<typeof createClient>)
-  : createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true } })
+  : createClient(url, key, { auth: { persistSession: true, autoRefreshToken: true, flowType: 'pkce', detectSessionInUrl: true } })

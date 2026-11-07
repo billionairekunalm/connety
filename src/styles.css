@@ -438,3 +438,26 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 .phone-field input { border: 0; border-radius: 0; box-shadow: none !important; min-width: 0; flex: 1; }
 .phone-field .dial { flex: none; display: flex; align-items: center; padding: 0 12px; background: var(--bg); color: var(--text); font-weight: 600; white-space: nowrap; border-right: 1.5px solid var(--line); }
 .phone-field select.dial { width: 104px; border: 0; border-radius: 0; border-right: 1.5px solid var(--line); box-shadow: none !important; padding: 0 8px; font-size: 15px; }
+
+/* sign in / sign up */
+.auth-tabs { margin: 4px 0 2px; }
+.btn-google {
+  display: flex; align-items: center; justify-content: center; gap: 10px; width: 100%; padding: 16px; border-radius: 999px;
+  background: #fff; color: #1f1f1f; border: 1.5px solid #dadce0; font-weight: 600; font-size: 16px;
+}
+.btn-google:disabled, .btn-black:disabled { opacity: .7; }
+.or { display: flex; align-items: center; gap: 10px; color: var(--muted); font-size: 13px; }
+.or::before, .or::after { content: ''; flex: 1; height: 1.5px; background: var(--line); }
+.auth-field { margin: 0; }
+.auth-field input[aria-invalid="true"] { border-color: #e5484d; }
+.field-err { color: #e5484d; font-size: 13px; font-weight: 500; }
+.pw { position: relative; display: block; }
+.pw input { padding-right: 52px; }
+.pw-eye { position: absolute; right: 6px; top: 50%; transform: translateY(-50%); width: 40px; height: 40px; display: grid; place-items: center; color: var(--muted); border-radius: 50%; }
+.link-btn { justify-self: end; color: var(--purple); font-weight: 600; font-size: 14px; padding: 2px 4px; }
+.link-btn.inline { display: inline; padding: 0; text-decoration: underline; }
+.auth-info { padding: 12px 14px; border-radius: 16px; background: #dcfce7; color: #166534; font-size: 14px; }
+.spin { width: 18px; height: 18px; border-radius: 50%; border: 2.5px solid #dadce0; border-top-color: #4285f4; animation: spin .7s linear infinite; }
+.spin.light { border-color: rgba(255, 255, 255, .35); border-top-color: #fff; }
+@media (prefers-color-scheme: dark) { .spin.light { border-color: rgba(0, 0, 0, .25); border-top-color: #111; } }
+@keyframes spin { to { transform: rotate(360deg); } }
