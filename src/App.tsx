@@ -544,9 +544,14 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
   }
 
   const contacted = async (c: Contact) => {
-    const { error } = await supabase.from('contacts').update({ last_contacted_at: new Date().toISOString(), next_call_at: null }).eq('id', c.id)
+    // A date you set stays until that day comes; after that it's back to "call every X days".
+    const keep = c.next_call_at && dueIn(c) > 0
+    const { error } = await supabase.from('contacts')
+      .update({ last_contacted_at: new Date().toISOString(), next_call_at: keep ? c.next_call_at : null }).eq('id', c.id)
     if (error) return alert(error.message)
-    flash(`✓ ${c.name} done · next call in ${c.contact_every_days}d`)
+    flash(keep
+      ? `✓ ${c.name} done · next call ${fmt(new Date(c.next_call_at!), { weekday: 'short', day: 'numeric', month: 'short' })}`
+      : `✓ ${c.name} done · next call in ${c.contact_every_days}d`)
     load()
   }
 
@@ -1112,13 +1117,13 @@ function PhotoTile({ label, icon, capture, file, url, onFile, crop }: {
 
 // "How did the call go?" Write it as a note or as bullet points, switch any time, or speak it.
 const toPoints = (t: string) => t.split(/\n+|(?<=[.!?])\s+/).map(s => s.trim()).filter(Boolean)
-const NEXT_OPTIONS: [string, number][] = [['3 days', 3], ['1 week', 7], ['2 weeks', 14], ['1 month', 30], ['3 months', 90]]
 const isoDay = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 const inDays = (n: number) => isoDay(new Date(Date.now() + n * DAY))
 function CallNote({ c, onSave, onClose }: {
   c: Contact; onSave: (body: string, format: 'note' | 'points', next: Date) => void; onClose: () => void
 }) {
-  const [next, setNext] = useState(inDays(c.contact_every_days)) // starts at their usual gap
+  // Starts at the date you already set for them (if still ahead), otherwise their usual gap.
+  const [next, setNext] = useState(c.next_call_at && dueIn(c) > 0 ? isoDay(new Date(c.next_call_at)) : inDays(c.contact_every_days))
   const [format, setFormat] = useState<'note' | 'points'>('note')
   const [text, setText] = useState('')
   const [points, setPoints] = useState<string[]>([''])
@@ -1179,15 +1184,8 @@ function CallNote({ c, onSave, onClose }: {
             <b><Ic n="calendar" s={16} /> When to call next?</b>
             <span className="muted small">{fmt(new Date(`${next}T09:00`), { weekday: 'short', day: 'numeric', month: 'short' })}</span>
           </div>
-          <div className="chips">
-            {NEXT_OPTIONS.map(([label, n]) => (
-              <button key={n} className={`chip press ${next === inDays(n) ? 'on' : ''}`} onClick={() => setNext(inDays(n))}>
-                {label}{n === c.contact_every_days && ' (usual)'}
-              </button>
-            ))}
-            <input type="date" className="chip-input date" value={next} min={inDays(1)} aria-label="Pick a date"
-              onChange={e => e.target.value && setNext(e.target.value)} />
-          </div>
+          <input type="date" className="next-date" value={next} min={inDays(1)} aria-label="Date of the next call"
+            onChange={e => e.target.value && setNext(e.target.value)} />
         </div>
 
         <div className="two">

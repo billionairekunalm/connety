@@ -343,5 +343,5 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 .next-call { background: var(--bg); border-radius: 20px; padding: 12px 14px 2px; }
 .next-head { display: flex; justify-content: space-between; align-items: center; }
 .next-head b { display: inline-flex; align-items: center; gap: 6px; }
-.next-call .chips { margin: 10px 0 10px; }
-.chip-input.date { width: auto; min-width: 140px; }
+.next-call { padding-bottom: 12px; }
+.next-date { margin-top: 10px; font-weight: 600; }
