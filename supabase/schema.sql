@@ -353,3 +353,5 @@ revoke execute on function join_room(uuid) from public, anon;
 grant execute on function room_people(uuid) to authenticated;
 grant execute on function my_rooms() to authenticated;
 grant execute on function join_room(uuid) to authenticated;
+-- Only people who host events see "Create a room". Set during card setup or in Edit card. Safe to run more than once.
+alter table profiles add column if not exists hosts_events boolean not null default false;

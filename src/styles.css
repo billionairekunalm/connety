@@ -398,3 +398,19 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 .join-count b { font-size: 56px; line-height: 1; font-weight: 800; }
 .join-count span { color: var(--muted); }
 .join-how { margin: 12px 0; padding: 16px 16px 16px 36px; border-radius: 22px; background: var(--surface); display: grid; gap: 6px; font-size: 14px; }
+
+/* "I host events" checkbox */
+.host-toggle {
+  display: flex; align-items: flex-start; gap: 12px; padding: 14px 16px; margin-bottom: 16px; cursor: pointer;
+  border-radius: 20px; background: var(--surface); border: 1.5px solid var(--line); color: var(--text); transition: border-color .2s, background .2s;
+}
+.host-toggle input { position: absolute; opacity: 0; pointer-events: none; }
+.host-toggle .tick {
+  width: 26px; height: 26px; flex: none; border-radius: 8px; border: 2px solid var(--muted); display: grid; place-items: center;
+  color: transparent; transition: background .2s, border-color .2s, color .2s;
+}
+.host-toggle b { display: block; font-size: 15px; }
+.host-toggle .small { color: var(--muted); font-weight: 400; }
+.host-toggle.on { border-color: #ffc145; background: color-mix(in srgb, #ffc145 12%, var(--surface)); }
+.host-toggle.on .tick { background: #111; border-color: #111; color: #fff; }
+.host-toggle:focus-within { box-shadow: 0 0 0 4px rgba(169, 155, 255, .35); }

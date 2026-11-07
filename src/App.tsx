@@ -22,6 +22,7 @@ type Note = { id: string; contact_id: string; kind: 'call' | 'note'; format: 'no
 type Profile = {
   id: string; name: string; headline: string | null; phone: string | null; email: string | null
   city: string | null; hometown: string | null; help_with: string | null; photo_path: string | null; links: Link[]
+  hosts_events?: boolean // private: shows "Create a room" in Events
 }
 type Ev = { id: string; name: string; date: string | null; place: string | null; lat: number | null; lng: number | null; room_id?: string | null }
 type Room = {
@@ -345,6 +346,7 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
     city: p?.city ?? '', hometown: p?.hometown ?? '', help_with: p?.help_with ?? '',
   })
   const [links, setLinks] = useState<Link[]>(p?.links ?? [{ label: 'LinkedIn', url: '' }])
+  const [hosts, setHosts] = useState(!!p?.hosts_events)
   const [photo, setPhoto] = useState<File>()
   const [busy, setBusy] = useState(false)
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
@@ -356,7 +358,7 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
     try {
       const row = {
         id: uid, name: f.name.trim(), headline: nn(f.headline), phone: nn(f.phone), email: nn(f.email),
-        city: nn(f.city), hometown: nn(f.hometown), help_with: nn(f.help_with),
+        city: nn(f.city), hometown: nn(f.hometown), help_with: nn(f.help_with), hosts_events: hosts,
         links: links.filter(l => l.url.trim()).map(l => ({ label: l.label.trim(), url: safeUrl(l.url.trim()) })),
         photo_path: photo ? await upload(uid, photo, 'avatars') : p?.photo_path ?? null,
       }
@@ -388,6 +390,15 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
         <label>Hometown<input value={f.hometown} onChange={set('hometown')} placeholder="Nagpur" /></label>
       </div>
       <label>I can help with<textarea rows={3} value={f.help_with} onChange={set('help_with')} placeholder="Solar projects, startup fundraising, Pune real estate…" /></label>
+
+      <label className={`host-toggle press ${hosts ? 'on' : ''}`}>
+        <input type="checkbox" checked={hosts} onChange={e => setHosts(e.target.checked)} />
+        <span className="tick" aria-hidden><Ic n="check" s={16} /></span>
+        <span className="grow">
+          <b>I host events</b>
+          <span className="small">Get a "Create a room" option: one QR for your guests to join and meet each other. You can change this any time in Edit card.</span>
+        </span>
+      </label>
 
       <div className="field">
         <span>Links</span>
@@ -727,13 +738,16 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
         {tab === 'events' && <>
           <h1 className="big">EVENTS</h1>
 
-          <section className="rooms-hero press" onClick={() => setModal({ kind: 'newRoom' })}>
-            <span className="tag">✨ Event rooms</span>
-            <h2>Hosting an<br />event?</h2>
-            <p>Create a room with one QR. Guests scan it to join and see who's here while the event is on.</p>
-            <span className="hero-btn"><Ic n="plus" s={18} /> Create a room</span>
-            <i className="shape s1" /><i className="shape s2" />
-          </section>
+          {/* Only hosts get "Create a room" (set in card setup / Edit card). Everyone can still join rooms. */}
+          {profile.hosts_events && (
+            <section className="rooms-hero press" onClick={() => setModal({ kind: 'newRoom' })}>
+              <span className="tag">✨ Event rooms</span>
+              <h2>Hosting an<br />event?</h2>
+              <p>Create a room with one QR. Guests scan it to join and see who's here while the event is on.</p>
+              <span className="hero-btn"><Ic n="plus" s={18} /> Create a room</span>
+              <i className="shape s1" /><i className="shape s2" />
+            </section>
+          )}
 
           {rooms.length > 0 && (
             <div className="room-list">
