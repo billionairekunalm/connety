@@ -379,3 +379,5 @@ create policy "own settings" on user_settings for all using (id = auth.uid()) wi
 
 alter table contacts drop constraint if exists contacts_importance_check;
 alter table contacts add constraint contacts_importance_check check (importance between 1 and 8);
+-- Your country, used for the phone code on your card and as the default for people you add. Safe to run more than once.
+alter table profiles add column if not exists country text;

@@ -7,7 +7,7 @@
     "dev:offline": "vite --mode offline --port 5174",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
-    "check": "node src/voice.check.ts && node src/cardscan.check.ts"
+    "check": "node src/voice.check.ts && node src/cardscan.check.ts && node src/countries.check.ts"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.45.4",

@@ -431,3 +431,10 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 .cat-count::after { content: ' 👤'; }
 .cat-colors { flex-basis: 100%; display: flex; flex-wrap: wrap; gap: 8px; padding: 6px 0 4px 26px; }
 .add-cat { margin-top: 10px; }
+
+/* phone with country code */
+.phone-field { display: flex; align-items: stretch; border-radius: 18px; border: 1.5px solid var(--line); background: var(--surface); overflow: hidden; transition: border-color .15s, box-shadow .15s; }
+.phone-field:focus-within { border-color: var(--inv); box-shadow: 0 0 0 4px rgba(169, 155, 255, .35); }
+.phone-field input { border: 0; border-radius: 0; box-shadow: none !important; min-width: 0; flex: 1; }
+.phone-field .dial { flex: none; display: flex; align-items: center; padding: 0 12px; background: var(--bg); color: var(--text); font-weight: 600; white-space: nowrap; border-right: 1.5px solid var(--line); }
+.phone-field select.dial { width: 104px; border: 0; border-radius: 0; border-right: 1.5px solid var(--line); box-shadow: none !important; padding: 0 8px; font-size: 15px; }

@@ -6,6 +6,7 @@ import QRCode from 'qrcode'
 import { LOCAL, supabase } from './supabase'
 import { nameFrom } from './voice'
 import { parseCard } from './cardscan'
+import { COUNTRIES, byCode, flag, fullNumber, guessCountry, splitNumber, waDigits } from './countries'
 import { canPrompt, isIOS, isStandalone, onInstallChange, promptInstall, pushNeedsInstall, pushSupported, subscribePush } from './pwa'
 
 type Contact = {
@@ -23,6 +24,7 @@ type Profile = {
   id: string; name: string; headline: string | null; phone: string | null; email: string | null
   city: string | null; hometown: string | null; help_with: string | null; photo_path: string | null; links: Link[]
   hosts_events?: boolean // private: shows "Create a room" in Events
+  country?: string | null // ISO code, e.g. IN; sets the phone code
 }
 type Ev = { id: string; name: string; date: string | null; place: string | null; lat: number | null; lng: number | null; room_id?: string | null }
 type Room = {
@@ -54,6 +56,7 @@ const DEFAULT_CATS: Cat[] = [
 // ponytail: module-level, set by App before every render so all screens read the same list;
 // pass it down as a prop if components ever start memoizing.
 let CATS: Cat[] = DEFAULT_CATS
+let MY_COUNTRY = guessCountry() // replaced by your card's country once loaded
 const catIds = () => CATS.map((_, k) => k + 1)
 const catName = (i: number) => CATS[i - 1]?.name ?? CATS[CATS.length - 1].name
 const catColor = (i: number) => CATS[i - 1]?.color ?? '#d4d4d4'
@@ -196,6 +199,7 @@ export default function App() {
   const [ready, setReady] = useState(false)
   const [profile, setProfile] = useState<Profile | null>() // undefined = loading, null = not created yet
   const [cats, setCats] = useState<Cat[]>(DEFAULT_CATS)
+  MY_COUNTRY = profile?.country ?? guessCountry()
   CATS = cats
   const uid = session?.user.id
   useEffect(() => {
@@ -334,7 +338,7 @@ function Places({ lives, from }: { lives: string | null; from: string | null }) 
 
 // The Linktree-style card: what people see when they scan your QR.
 function CardView({ p }: { p: Profile }) {
-  const wa = p.phone?.replace(/\D/g, '')
+  const wa = p.phone ? waDigits(p.phone, p.country ?? MY_COUNTRY) : ''
   return <>
     <div className="big-avatar">{p.photo_path ? <img src={pub(p.photo_path)} alt="" /> : p.name[0]?.toUpperCase()}</div>
     <h1 className="center">{p.name}</h1>
@@ -369,11 +373,12 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
   uid: string; email: string; p?: Profile; onboarding?: boolean; done: (p: Profile) => void
 }) {
   const [f, setF] = useState({
-    name: p?.name ?? '', headline: p?.headline ?? '', phone: p?.phone ?? '', email: p?.email ?? email,
+    name: p?.name ?? '', headline: p?.headline ?? '', phone: splitNumber(p?.phone, p?.country ?? guessCountry()).national, email: p?.email ?? email,
     city: p?.city ?? '', hometown: p?.hometown ?? '', help_with: p?.help_with ?? '',
   })
   const [links, setLinks] = useState<Link[]>(p?.links ?? [{ label: 'LinkedIn', url: '' }])
   const [hosts, setHosts] = useState(!!p?.hosts_events)
+  const [country, setCountry] = useState(p?.country ?? guessCountry())
   const [photo, setPhoto] = useState<File>()
   const [busy, setBusy] = useState(false)
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
@@ -384,7 +389,7 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
     setBusy(true)
     try {
       const row = {
-        id: uid, name: f.name.trim(), headline: nn(f.headline), phone: nn(f.phone), email: nn(f.email),
+        id: uid, name: f.name.trim(), headline: nn(f.headline), phone: fullNumber(country, f.phone), country, email: nn(f.email),
         city: nn(f.city), hometown: nn(f.hometown), help_with: nn(f.help_with), hosts_events: hosts,
         links: links.filter(l => l.url.trim()).map(l => ({ label: l.label.trim(), url: safeUrl(l.url.trim()) })),
         photo_path: photo ? await upload(uid, photo, 'avatars') : p?.photo_path ?? null,
@@ -408,10 +413,19 @@ function ProfileForm({ uid, email, p, onboarding, done }: {
       </div>
       <label>Full name *<input required value={f.name} onChange={set('name')} placeholder="Ravi Kumar" autoComplete="name" /></label>
       <label>Headline<input value={f.headline} onChange={set('headline')} placeholder="Founder @ SolarCo · Angel investor" /></label>
-      <div className="two">
-        <label>Mobile<input type="tel" value={f.phone} onChange={set('phone')} placeholder="+91…" autoComplete="tel" /></label>
-        <label>Email<input type="email" value={f.email} onChange={set('email')} autoComplete="email" /></label>
-      </div>
+      <label>Country
+        <select value={country} onChange={e => setCountry(e.target.value)} autoComplete="country">
+          {COUNTRIES.map(c => <option key={c.code} value={c.code}>{flag(c.code)} {c.name} (+{c.dial})</option>)}
+        </select>
+      </label>
+      <label>Mobile
+        <span className="phone-field">
+          <span className="dial" aria-hidden>{flag(country)} +{byCode(country)?.dial}</span>
+          <input type="tel" inputMode="tel" value={f.phone} onChange={set('phone')} placeholder="98765 43210" autoComplete="tel-national"
+            aria-label={`Mobile number, after +${byCode(country)?.dial}`} />
+        </span>
+      </label>
+      <label>Email<input type="email" value={f.email} onChange={set('email')} autoComplete="email" /></label>
       <div className="two">
         <label>Currently living in<input value={f.city} onChange={set('city')} placeholder="Mumbai" autoComplete="address-level2" /></label>
         <label>Hometown<input value={f.hometown} onChange={set('hometown')} placeholder="Nagpur" /></label>
@@ -965,7 +979,7 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
               <div className="quick">
                 <button className="press" onClick={() => contacted(person)}><span className="circle"><Ic n="check" /></span>Contacted</button>
                 {person.email && <a className="press" href={`mailto:${person.email}`}><span className="circle"><Ic n="mail" /></span>Email</a>}
-                {person.phone && <a className="press" href={`https://wa.me/${person.phone.replace(/\D/g, '')}`} target="_blank" rel="noreferrer"><span className="circle"><Ic n="chat" /></span>WhatsApp</a>}
+                {person.phone && <a className="press" href={`https://wa.me/${waDigits(person.phone, MY_COUNTRY)}`} target="_blank" rel="noreferrer"><span className="circle"><Ic n="chat" /></span>WhatsApp</a>}
                 <button className="press" onClick={async () => {
                   if (!confirm(`Delete ${person.name}?`)) return
                   await supabase.from('contacts').delete().eq('id', person.id)
@@ -1110,9 +1124,10 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
   uid: string; c?: Contact; eventId?: string; events: Ev[]; urls: Record<string, string>; done: (id?: string) => void
 }) {
   const [f, setF] = useState({
-    name: c?.name ?? '', phone: c?.phone ?? '', email: c?.email ?? '', company: c?.company ?? '', current_city: c?.current_city ?? '', hometown: c?.hometown ?? '', met_where: c?.met_where ?? '', help_note: c?.help_note ?? '',
+    name: c?.name ?? '', phone: splitNumber(c?.phone, MY_COUNTRY).national, email: c?.email ?? '', company: c?.company ?? '', current_city: c?.current_city ?? '', hometown: c?.hometown ?? '', met_where: c?.met_where ?? '', help_note: c?.help_note ?? '',
     importance: c?.importance ?? 2, contact_every_days: c?.contact_every_days ?? 30, event_id: c?.event_id ?? eventId ?? '',
   })
+  const [phoneCountry, setPhoneCountry] = useState(splitNumber(c?.phone, MY_COUNTRY).country)
   const [selfie, setSelfie] = useState<File>()
   const [card, setCard] = useState<File>()
   const [scan, setScan] = useState('')
@@ -1128,8 +1143,11 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
       })
       const info = parseCard(data.text)
       const found = (['name', 'phone', 'email', 'company'] as const).filter(k => info[k])
+      // A scanned "+971…" switches the code picker; the box keeps just the local part.
+      const scanned = info.phone ? splitNumber(info.phone, phoneCountry) : null
+      if (scanned && !f.phone) setPhoneCountry(scanned.country)
       setF(p => ({
-        ...p, name: p.name || info.name || '', phone: p.phone || info.phone || '',
+        ...p, name: p.name || info.name || '', phone: p.phone || scanned?.national || '',
         email: p.email || info.email || '', company: p.company || info.company || '',
       }))
       setScan(found.length
@@ -1149,7 +1167,7 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
     try {
       const ev = events.find(e => e.id === f.event_id)
       const row = {
-        ...f, event_id: f.event_id || null, phone: f.phone || null, email: nn(f.email), company: nn(f.company), current_city: nn(f.current_city), hometown: nn(f.hometown),
+        ...f, event_id: f.event_id || null, phone: fullNumber(phoneCountry, f.phone), email: nn(f.email), company: nn(f.company), current_city: nn(f.current_city), hometown: nn(f.hometown),
         contact_every_days: Math.max(1, +f.contact_every_days || 30),
         lat: loc?.lat ?? ev?.lat ?? null, lng: loc?.lng ?? ev?.lng ?? null,
         ...(selfie && { selfie_path: await upload(uid, selfie) }),
@@ -1183,7 +1201,14 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
 
       <label>Name *<input required value={f.name} onChange={set('name')} placeholder="Ravi Kumar" /></label>
       {scan && <p className={`scan-status ${scan.startsWith('✓') ? 'ok' : ''}`} role="status">{scan}</p>}
-      <label>Mobile<input type="tel" value={f.phone} onChange={set('phone')} placeholder="+91…" /></label>
+      <label>Mobile
+        <span className="phone-field">
+          <select className="dial" value={phoneCountry} onChange={e => setPhoneCountry(e.target.value)} aria-label="Country code">
+            {COUNTRIES.map(c => <option key={c.code} value={c.code}>{flag(c.code)} +{c.dial} {c.name}</option>)}
+          </select>
+          <input type="tel" inputMode="tel" value={f.phone} onChange={set('phone')} placeholder="98765 43210" aria-label="Mobile number" />
+        </span>
+      </label>
       <div className="two">
         <label>Email<input type="email" value={f.email} onChange={set('email')} placeholder="ravi@solarco.in" /></label>
         <label>Company<input value={f.company} onChange={set('company')} placeholder="SolarCo" /></label>
