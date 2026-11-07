@@ -6,6 +6,7 @@ import QRCode from 'qrcode'
 import { LOCAL, supabase } from './supabase'
 import { nameFrom } from './voice'
 import { parseCard } from './cardscan'
+import { Av } from './faces'
 const Intro = lazy(() => import('./Intro')) // only first-time visitors download this
 import { COUNTRIES, byCode, flag, fullNumber, guessCountry, splitNumber, waDigits } from './countries'
 import { canPrompt, isIOS, isStandalone, onInstallChange, promptInstall, pushNeedsInstall, pushSupported, subscribePush } from './pwa'
@@ -171,6 +172,7 @@ const PATHS: Record<string, ReactNode> = {
   trash: <path d="M4 7h16M10 11v6M14 11v6M6 7l1 13h10l1-13M9 7V4h6v3" />,
   camera: <><path d="M4 8h3l2-3h6l2 3h3v11H4z" /><circle cx="12" cy="13" r="3.5" /></>,
   card: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M7 10h6M7 14h4" /></>,
+  user: <><circle cx="12" cy="8" r="4" /><path d="M4 21c0-4 4-6 8-6s8 2 8 6" /></>,
   mail: <><rect x="3" y="5" width="18" height="14" rx="2" /><path d="M3 7l9 6 9-6" /></>,
   qr: <><rect x="3" y="3" width="7" height="7" rx="1" /><rect x="14" y="3" width="7" height="7" rx="1" /><rect x="3" y="14" width="7" height="7" rx="1" /><path d="M14 14h3v3h-3zM20 14v.01M14 20h.01M17 20h4v-3" /></>,
   share: <><circle cx="6" cy="12" r="2.5" /><circle cx="18" cy="6" r="2.5" /><circle cx="18" cy="18" r="2.5" /><path d="M8.2 10.9l7.6-3.8M8.2 13.1l7.6 3.8" /></>,
@@ -578,73 +580,94 @@ function Login() {
   }
   const fieldErr = (k: keyof typeof errors) => touched[k] && errors[k] ? <span className="field-err">{errors[k]}</span> : null
 
+  const heading = mode === 'signin'
+    ? { h: <>Welcome <mark>back.</mark></>, p: 'Your people are waiting. Pick up right where you left off.' }
+    : mode === 'signup'
+      ? { h: <>Start remembering<br /><mark>everyone.</mark></>, p: 'Free to start. Takes 30 seconds.' }
+      : { h: <>Forgot your<br /><mark>password?</mark></>, p: "Enter your email and we'll send you a link to reset it." }
+
   return (
-    <form className="login" noValidate onSubmit={e => { e.preventDefault(); submit() }}>
-      <section className="hero">
-        <h2>Never lose<br />a person<br />you met.</h2>
-        <p>Selfie, card, notes & reminders.</p>
-        <i className="shape s1" /><i className="shape s2" /><i className="shape s3" />
-      </section>
+    <div className="lg">
+      <div className="lg-bg" aria-hidden><i /><i /></div>
+      <form className="lg-form" noValidate onSubmit={e => { e.preventDefault(); submit() }}>
+        <div className="lg-hero" aria-hidden>
+          <span className="lg-bub b1" style={{ '--d': '.5s' } as CSSProperties}>📞</span>
+          <span className="lg-bub b2" style={{ '--d': '.7s' } as CSSProperties}>🔔</span>
+          {[1, 3, 0, 5, 2].map((p, k) => <span key={k} className={`lg-face f${k}`} style={{ '--d': `${[0.15, 0.05, 0, 0.1, 0.2][k]}s` } as CSSProperties}><Av i={p} /></span>)}
+        </div>
+        <h1 className="lg-title" key={mode}>{heading.h}</h1>
+        <p className="lg-sub" key={mode + 'p'}>{heading.p}</p>
 
-      {mode === 'forgot'
-        ? <h1 className="big">RESET<br />PASSWORD</h1>
-        : <div className="seg auth-tabs" role="tablist">
-            <button type="button" role="tab" aria-selected={mode === 'signin'} className={mode === 'signin' ? 'on' : ''} onClick={() => switchMode('signin')}>Sign in</button>
-            <button type="button" role="tab" aria-selected={mode === 'signup'} className={mode === 'signup' ? 'on' : ''} onClick={() => switchMode('signup')}>Create account</button>
-          </div>}
+        <div className="lg-card">
+          {mode === 'forgot'
+            ? <button type="button" className="lg-back" onClick={() => switchMode('signin')}><Ic n="back" s={16} /> Back to sign in</button>
+            : <div className="seg auth-tabs" role="tablist">
+                <button type="button" role="tab" aria-selected={mode === 'signin'} className={mode === 'signin' ? 'on' : ''} onClick={() => switchMode('signin')}>Sign in</button>
+                <button type="button" role="tab" aria-selected={mode === 'signup'} className={mode === 'signup' ? 'on' : ''} onClick={() => switchMode('signup')}>Create account</button>
+              </div>}
 
-      {mode !== 'forgot' && (
-        <>
-          <button type="button" className="btn-google press" onClick={google} disabled={!!busy}>
-            {busy === 'google' ? <span className="spin" aria-hidden /> : <GoogleIcon />} Continue with Google
+          {mode !== 'forgot' && (
+            <>
+              <button type="button" className="btn-google press" onClick={google} disabled={!!busy}>
+                {busy === 'google' ? <span className="spin" aria-hidden /> : <GoogleIcon />} Continue with Google
+              </button>
+              <div className="or"><span>or with email</span></div>
+            </>
+          )}
+
+          <div className="lg-fields" key={mode}>
+            {mode === 'signup' && (
+              <label className="auth-field">Full name
+                <span className="lg-in"><Ic n="user" s={18} />
+                  <input value={name} onChange={e => setName(e.target.value)} onBlur={() => setTouched(t => ({ ...t, name: true }))}
+                    autoComplete="name" placeholder="Ravi Kumar" aria-invalid={!!(touched.name && errors.name)} />
+                </span>
+                {fieldErr('name')}
+              </label>
+            )}
+            <label className="auth-field">Email
+              <span className="lg-in"><Ic n="mail" s={18} />
+                <input type="email" inputMode="email" value={email} onChange={e => setEmail(e.target.value)} onBlur={() => setTouched(t => ({ ...t, email: true }))}
+                  autoComplete="email" placeholder="you@example.com" aria-invalid={!!(touched.email && errors.email)} />
+              </span>
+              {fieldErr('email')}
+            </label>
+            {mode !== 'forgot' && (
+              <label className="auth-field">Password
+                <span className="pw lg-in"><Ic n="lock" s={18} />
+                  <input type={show ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
+                    onBlur={() => setTouched(t => ({ ...t, password: true }))} placeholder={mode === 'signup' ? 'At least 8 characters' : 'Your password'}
+                    autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} aria-invalid={!!(touched.password && errors.password)} />
+                  <button type="button" className="pw-eye" onClick={() => setShow(v => !v)} aria-label={show ? 'Hide password' : 'Show password'}>
+                    <Ic n={show ? 'eyeoff' : 'eye'} s={20} />
+                  </button>
+                </span>
+                {fieldErr('password')}
+              </label>
+            )}
+          </div>
+          {mode === 'signin' && <button type="button" className="link-btn" onClick={() => switchMode('forgot')}>Forgot password?</button>}
+
+          <button className="btn-black press lg-cta" disabled={!!busy}>
+            {busy === 'email' && <span className="spin light" aria-hidden />}
+            {mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Send reset link'}
+            {!busy && <Ic n="arrow" s={18} />}
           </button>
-          <div className="or"><span>or with email</span></div>
-        </>
-      )}
 
-      {mode === 'signup' && (
-        <label className="auth-field">Full name
-          <input value={name} onChange={e => setName(e.target.value)} onBlur={() => setTouched(t => ({ ...t, name: true }))}
-            autoComplete="name" placeholder="Ravi Kumar" aria-invalid={!!(touched.name && errors.name)} />
-          {fieldErr('name')}
-        </label>
-      )}
-      <label className="auth-field">Email
-        <input type="email" inputMode="email" value={email} onChange={e => setEmail(e.target.value)} onBlur={() => setTouched(t => ({ ...t, email: true }))}
-          autoComplete="email" placeholder="you@example.com" aria-invalid={!!(touched.email && errors.email)} />
-        {fieldErr('email')}
-      </label>
-      {mode !== 'forgot' && (
-        <label className="auth-field">Password
-          <span className="pw">
-            <input type={show ? 'text' : 'password'} value={password} onChange={e => setPassword(e.target.value)}
-              onBlur={() => setTouched(t => ({ ...t, password: true }))} placeholder={mode === 'signup' ? 'At least 8 characters' : 'Your password'}
-              autoComplete={mode === 'signup' ? 'new-password' : 'current-password'} aria-invalid={!!(touched.password && errors.password)} />
-            <button type="button" className="pw-eye" onClick={() => setShow(v => !v)} aria-label={show ? 'Hide password' : 'Show password'}>
-              <Ic n={show ? 'eyeoff' : 'eye'} s={20} />
-            </button>
-          </span>
-          {fieldErr('password')}
-        </label>
-      )}
-      {mode === 'signin' && <button type="button" className="link-btn" onClick={() => switchMode('forgot')}>Forgot password?</button>}
+          {err && (
+            <p className="msg" role="alert">
+              {err.text}{' '}
+              {err.resend && <button type="button" className="link-btn inline" onClick={resend}>Resend email</button>}
+              {err.switchTo && <button type="button" className="link-btn inline" onClick={() => switchMode(err.switchTo!)}>Sign in</button>}
+            </p>
+          )}
+          {info && <p className="auth-info" role="status">{info}</p>}
+        </div>
 
-      <button className="btn-black press" disabled={!!busy}>
-        {busy === 'email' && <span className="spin light" aria-hidden />}
-        {mode === 'signin' ? 'Sign in' : mode === 'signup' ? 'Create account' : 'Send reset link'}
-      </button>
-      {mode === 'forgot' && <button type="button" className="btn-ghost press" onClick={() => switchMode('signin')}>Back to sign in</button>}
-
-      {err && (
-        <p className="msg" role="alert">
-          {err.text}{' '}
-          {err.resend && <button type="button" className="link-btn inline" onClick={resend}>Resend email</button>}
-          {err.switchTo && <button type="button" className="link-btn inline" onClick={() => switchMode(err.switchTo!)}>Sign in</button>}
-        </p>
-      )}
-      {info && <p className="auth-info" role="status">{info}</p>}
-      {LOCAL && <p className="muted small center">Local test mode: any email/password works, data stays in this browser.</p>}
-    </form>
+        <p className="lg-foot">🔒 Private by design. Only you can see the people you save.</p>
+        {LOCAL && <p className="muted small center">Local test mode: any email/password works, data stays in this browser.</p>}
+      </form>
+    </div>
   )
 }
 

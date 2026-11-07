@@ -59,8 +59,6 @@
 @keyframes glow-btn { 50% { box-shadow: 0 0 0 8px color-mix(in srgb, var(--purple) 35%, transparent); } }
 
 /* people */
-.av { display: block; width: 100%; height: 100%; border-radius: 50%; overflow: hidden; border: 3px solid var(--surface); box-shadow: 0 8px 20px rgba(0, 0, 0, .15); background: #fff; }
-.av svg { display: block; width: 100%; height: 100%; }
 .node { position: absolute; z-index: 1; left: calc(50% + var(--x)); top: calc(50% + var(--y)); width: var(--s); height: var(--s); margin: calc(var(--s) / -2) 0 0 calc(var(--s) / -2); }
 .node .av { opacity: 0; scale: 0; }
 .slide.on .node .av { animation: pop .6s var(--d) cubic-bezier(.2, .9, .3, 1.25) both; }
