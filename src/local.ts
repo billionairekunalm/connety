@@ -159,6 +159,24 @@ const signIn = async ({ email }: { email: string }) => {
 export const localClient = {
   from,
   rpc,
+  // Live updates in test mode: other tabs' changes arrive via the storage event, room pings via BroadcastChannel.
+  channel: (topic: string) => {
+    const handlers: (() => void)[] = []
+    const bc = new BroadcastChannel('cx-' + topic)
+    const onStorage = (e: StorageEvent) => { if (e.key === KEY) handlers.forEach(h => h()) }
+    const c: any = {
+      on: (type: string, _f: unknown, cb: (p: unknown) => void) => {
+        if (type === 'postgres_changes') handlers.push(() => cb({}))
+        else bc.addEventListener('message', () => cb({}))
+        return c
+      },
+      subscribe: (cb?: (s: string) => void) => { addEventListener('storage', onStorage); cb?.('SUBSCRIBED'); return c },
+      send: async () => { bc.postMessage(1); return 'ok' },
+      close: () => { removeEventListener('storage', onStorage); bc.close() },
+    }
+    return c
+  },
+  removeChannel: async (c: { close?: () => void }) => c.close?.(),
   functions: { invoke: async () => ({ data: null, error: new Error("Reminders need Supabase; they don't run in test mode.") }) },
   auth: {
     getSession: async () => ({ data: { session: session() } }),

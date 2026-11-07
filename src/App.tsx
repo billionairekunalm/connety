@@ -500,6 +500,28 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
   }
   useEffect(() => { load() }, [])
 
+  // Live updates: any change to your people, events, notes, rooms or card (from another device, or
+  // someone connecting with you by QR) reloads the data. Also refresh when you come back to the app.
+  useEffect(() => {
+    let t: number | undefined
+    const refresh = () => { clearTimeout(t); t = window.setTimeout(load, 250) } // one reload per burst
+    const ch = supabase.channel(`live:${uid}`)
+    for (const table of ['contacts', 'events', 'interactions', 'rooms'])
+      ch.on('postgres_changes' as any, { event: '*', schema: 'public', table }, refresh)
+    ch.on('postgres_changes' as any, { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${uid}` },
+      (e: { new?: Profile }) => { if (e?.new?.id) setProfile(e.new) })
+    ch.subscribe()
+    const onBack = () => { if (!document.hidden) refresh() }
+    document.addEventListener('visibilitychange', onBack)
+    window.addEventListener('online', refresh)
+    return () => {
+      clearTimeout(t)
+      supabase.removeChannel(ch)
+      document.removeEventListener('visibilitychange', onBack)
+      window.removeEventListener('online', refresh)
+    }
+  }, [uid])
+
   // Came here from a room QR: join it (needs a card, which onboarding guarantees) and open it.
   useEffect(() => {
     const rid = localStorage.getItem(PENDING_ROOM)
@@ -507,6 +529,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
     localStorage.removeItem(PENDING_ROOM)
     supabase.rpc('join_room', { rid }).then(async ({ error }) => {
       if (error) return alert(error.message)
+      pingRoom(rid) // others in the room see the new guest right away
       await load()
       setTab('events')
       setModal({ kind: 'room', id: rid })
@@ -1220,6 +1243,15 @@ function PhotoTile({ label, icon, capture, file, url, onFile, crop }: {
 
 // ---------- Event rooms ----------
 
+// Guests can't read each other's membership rows, so a room shares changes as a content-free
+// "something changed" ping on its own channel; everyone in the room then re-asks the server.
+const pingRoom = (id: string) => {
+  const ch = supabase.channel(`room:${id}`)
+  ch.subscribe(status => {
+    if (status === 'SUBSCRIBED') ch.send({ type: 'broadcast', event: 'ping', payload: {} }).finally(() => supabase.removeChannel(ch))
+  })
+}
+
 function RoomForm({ done }: { done: (id: string) => void }) {
   const nextHour = new Date(); nextHour.setMinutes(0, 0, 0); nextHour.setHours(nextHour.getHours() + 1)
   const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
@@ -1278,17 +1310,23 @@ function RoomView({ room, uid, contacts, metHere, onOpen, onShowMyQr, onChanged,
   const [, tick] = useState(0)
   const host = room.organizer_id === uid
   const st = roomStatus(room)
-  // Refresh who's here every 20s while the room is open, and keep countdowns ticking.
+  // Live: re-ask who's here whenever someone in the room pings (join, host opens/extends/ends).
+  // The 20s timer keeps countdowns ticking and opens/closes the room on time, ping or not.
+  const roomCh = useRef<ReturnType<typeof supabase.channel>>()
   useEffect(() => {
     const get = () => supabase.rpc('room_people', { rid: room.id }).then(({ data }) => setPeople((data as RoomPerson[] | null) ?? []))
     get()
+    const ch = supabase.channel(`room:${room.id}`)
+    ch.on('broadcast', { event: 'ping' }, () => { get(); onChanged() }).subscribe()
+    roomCh.current = ch
     const t = setInterval(() => { tick(n => n + 1); if (roomStatus(room) === 'live' || host) get() }, 20000)
-    return () => clearInterval(t)
+    return () => { clearInterval(t); supabase.removeChannel(ch) }
   }, [room.id, room.starts_at, room.ends_at])
 
   const setTimes = async (patch: { starts_at?: string; ends_at?: string }, msg: string) => {
     const { error } = await supabase.from('rooms').update(patch).eq('id', room.id)
     if (error) return alert(error.message)
+    roomCh.current?.send({ type: 'broadcast', event: 'ping', payload: {} }) // guests see the new times now
     flash(msg); onChanged()
   }
   const share = async () => {
