@@ -229,6 +229,8 @@ export default function App() {
 function PublicCard({ pid, mine, loggedIn }: { pid: string; mine: boolean; loggedIn: boolean }) {
   const [p, setP] = useState<Profile | null>()
   const [ask, setAsk] = useState(false)
+  const [installHelp, setInstallHelp] = useState(false) // show install steps where there's no prompt
+  useEffect(() => { if (installHelp && !loggedIn) localStorage.setItem(PENDING, pid) }, [installHelp]) // install, then sign in: still saves them
   const [, rerender] = useState(0)
   useEffect(() => {
     supabase.rpc('get_profile', { pid }).then(({ data }) => setP((data as Profile[] | null)?.[0] ?? null))
@@ -282,14 +284,21 @@ function PublicCard({ pid, mine, loggedIn }: { pid: string; mine: boolean; logge
                 ? 'Open your people, reminders and QR card in one tap from your home screen.'
                 : `Install the app and sign in to save ${first}. You'll be added to each other's lists, and the app reminds you to keep in touch.`}
             </p>
-            {canPrompt() && !isStandalone() && (
-              <button className="btn-black press" onClick={install}><Ic n="download" s={18} /> Install app</button>
+            {/* Always offered (unless already installed): the real prompt where the browser has one, steps otherwise. */}
+            {!isStandalone() && (
+              <button className="btn-black press" onClick={() => (canPrompt() ? install() : setInstallHelp(true))}>
+                <Ic n="download" s={18} /> Install the app
+              </button>
             )}
-            {isIOS && !isStandalone() && (
-              <div className="ios-hint">Tap <Ic n="share" s={16} /> <b>Share</b> below, then <b>Add to Home Screen</b></div>
+            {installHelp && (
+              <div className="ios-hint" role="status">
+                {isIOS
+                  ? <>Tap <Ic n="share" s={16} /> <b>Share</b> at the bottom of Safari, then <b>Add to Home Screen</b></>
+                  : <>Open your browser menu <b>⋮</b>, then tap <b>Install app</b> or <b>Add to Home screen</b></>}
+              </div>
             )}
             {!loggedIn && (
-              <button className={canPrompt() ? 'btn-ghost press' : 'btn-black press'} onClick={connect}>Sign in or create account</button>
+              <button className={isStandalone() ? 'btn-black press' : 'btn-ghost press'} onClick={connect}>Sign in or create account</button>
             )}
             <button className="not-now" onClick={() => setAsk(false)}>Not now, just looking</button>
           </div>
