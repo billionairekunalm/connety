@@ -28,3 +28,6 @@ createRoot(document.getElementById('root')!).render(
       </div></div>
     : <Guard><App /></Guard>,
 )
+
+// The splash screen lives in index.html; tell it the app has painted.
+requestAnimationFrame(() => (window as unknown as { hideSplash?: () => void }).hideSplash?.())
