@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from 'react'
 import { createPortal } from 'react-dom'
 import type { Session } from '@supabase/supabase-js'
 import { MapContainer, TileLayer, CircleMarker, Popup } from 'react-leaflet'
@@ -6,6 +6,7 @@ import QRCode from 'qrcode'
 import { LOCAL, supabase } from './supabase'
 import { nameFrom } from './voice'
 import { parseCard } from './cardscan'
+const Intro = lazy(() => import('./Intro')) // only first-time visitors download this
 import { COUNTRIES, byCode, flag, fullNumber, guessCountry, splitNumber, waDigits } from './countries'
 import { canPrompt, isIOS, isStandalone, onInstallChange, promptInstall, pushNeedsInstall, pushSupported, subscribePush } from './pwa'
 
@@ -202,6 +203,10 @@ export default function App() {
   const [profile, setProfile] = useState<Profile | null>() // undefined = loading, null = not created yet
   const [cats, setCats] = useState<Cat[]>(DEFAULT_CATS)
   const [recovering, setRecovering] = useState(false)
+  // First visit (signed out): 3 story screens before sign-in. Not for scanned card/room links or anyone returning.
+  const [intro, setIntro] = useState(() => {
+    try { return !localStorage.getItem('intro-seen') && !localStorage.getItem(PENDING) && !localStorage.getItem(PENDING_ROOM) } catch { return false }
+  })
   MY_COUNTRY = profile?.country ?? guessCountry()
   CATS = cats
   const uid = session?.user.id
@@ -226,7 +231,11 @@ export default function App() {
   if (pid) return <PublicCard pid={pid} mine={pid === uid} loggedIn={!!uid} />
   if (rid) return <RoomJoin rid={rid} />
   if (recovering && session) return <NewPassword done={() => setRecovering(false)} />
-  if (!session || !uid) return <Login />
+  if (!session || !uid) {
+    return intro
+      ? <Suspense fallback={null}><Intro onDone={() => { try { localStorage.setItem('intro-seen', '1') } catch { /* private mode */ } setIntro(false) }} /></Suspense>
+      : <Login />
+  }
   if (profile === undefined) return null
   if (!profile) return (
     <div className="app">
