@@ -345,3 +345,56 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 .next-head b { display: inline-flex; align-items: center; gap: 6px; }
 .next-call { padding-bottom: 12px; }
 .next-date { margin-top: 10px; font-weight: 600; }
+
+/* ---------- event rooms ---------- */
+.rooms-hero {
+  position: relative; overflow: hidden; display: grid; gap: 8px; justify-items: start; padding: 22px; margin-bottom: 14px;
+  border-radius: var(--radius); background: linear-gradient(135deg, #ffc145, #ff9a5a); color: #111; cursor: pointer;
+}
+.rooms-hero h2 { font-size: 30px; line-height: 1; font-weight: 800; position: relative; z-index: 1; }
+.rooms-hero p { font-size: 14px; max-width: 75%; position: relative; z-index: 1; }
+.rooms-hero .tag, .rooms-hero .hero-btn { position: relative; z-index: 1; }
+.rooms-hero .s1 { background: linear-gradient(135deg, #a99bff, #7c6cf0); }
+.rooms-hero .s2 { border-color: #fff; }
+.hero-btn { display: inline-flex; align-items: center; gap: 6px; margin-top: 4px; padding: 12px 18px; border-radius: 999px; background: #111; color: #fff; font-weight: 600; }
+
+.room-list { display: grid; gap: 10px; margin-bottom: 18px; }
+.room-card {
+  display: grid; gap: 4px; text-align: left; padding: 16px 18px; border-radius: 24px; background: var(--surface);
+  border: 1.5px solid var(--line); animation: rise .4s ease both;
+}
+.room-card b { font-size: 19px; }
+.room-card.live { border-color: #22c55e; box-shadow: 0 0 0 3px rgba(34, 197, 94, .15); }
+.room-card.ended { opacity: .7; }
+.room-meta { display: flex; gap: 10px; align-items: center; font-size: 13px; color: var(--muted); }
+.room-meta span { display: inline-flex; align-items: center; gap: 4px; }
+.host-tag { background: #111; color: #fff !important; padding: 2px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
+
+.status { justify-self: start; display: inline-block; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--bg); color: var(--muted); }
+.status.live { background: #dcfce7; color: #15803d; animation: glow 2s ease-in-out infinite; }
+.status.upcoming { background: #fef3c7; color: #b45309; }
+@keyframes glow { 50% { box-shadow: 0 0 0 6px rgba(34, 197, 94, .15); } }
+.big-status { margin: 4px 0 8px; font-size: 13px; padding: 6px 14px; }
+.room .tag { justify-self: start; display: inline-block; margin-bottom: 8px; }
+.room-qr { margin: 6px 0 4px; }
+.room-tip { margin: -6px 0 12px; }
+.window-hint { display: flex; align-items: center; gap: 6px; margin: -4px 0 14px; }
+.room-link { margin-bottom: 8px; }
+
+.room-people { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 10px; margin-bottom: 24px; }
+.room-person {
+  display: grid; justify-items: center; gap: 3px; padding: 16px 10px 12px; border-radius: 22px; text-align: center;
+  background: var(--surface); border: 1.5px solid var(--line); animation: rise .4s ease both; min-width: 0;
+}
+.room-person b { font-size: 15px; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-person .small { max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room-person.connected { border-color: #22c55e; }
+.rp-photo { width: 64px; height: 64px; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: #111; color: #fff; font-weight: 700; font-size: 24px; margin-bottom: 6px; }
+.rp-photo img { width: 100%; height: 100%; object-fit: cover; }
+.rp-tag { margin-top: 6px; font-size: 11px; font-weight: 700; padding: 4px 10px; border-radius: 999px; background: var(--bg); color: var(--muted); }
+.rp-tag.ok { background: #dcfce7; color: #15803d; }
+
+.join-count { display: grid; justify-items: center; margin: 18px 0 6px; }
+.join-count b { font-size: 56px; line-height: 1; font-weight: 800; }
+.join-count span { color: var(--muted); }
+.join-how { margin: 12px 0; padding: 16px 16px 16px 36px; border-radius: 22px; background: var(--surface); display: grid; gap: 6px; font-size: 14px; }

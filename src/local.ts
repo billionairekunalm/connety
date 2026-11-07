@@ -4,7 +4,7 @@
 // ponytail: localStorage caps at ~5 MB (~20 compressed photos); fine for testing, real data goes to Supabase.
 type Row = Record<string, any>
 const KEY = 'connections-local'
-const load = (): Record<string, Row[]> => ({ events: [], contacts: [], profiles: [], interactions: [], ...JSON.parse(localStorage.getItem(KEY) ?? '{}') })
+const load = (): Record<string, Row[]> => ({ events: [], contacts: [], profiles: [], interactions: [], rooms: [], room_members: [], ...JSON.parse(localStorage.getItem(KEY) ?? '{}') })
 const store = (d: Record<string, Row[]>) => localStorage.setItem(KEY, JSON.stringify(d))
 const uid = () => { const e = localStorage.getItem(KEY + '-user'); return e ? 'local-' + e : null }
 const defaults: Record<string, () => Row> = {
@@ -15,13 +15,14 @@ const defaults: Record<string, () => Row> = {
   events: () => ({}),
   interactions: () => ({ kind: 'call', format: 'note' }),
   profiles: () => ({ links: [] }),
+  rooms: () => ({ organizer_id: uid(), place: null, description: null, lat: null, lng: null }),
 }
 const newRow = (table: string, r: Row) => ({ id: crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, created_at: new Date().toISOString(), ...defaults[table](), user_id: uid(), ...r })
 
 function from(table: string) {
   let op = 'select', payload: Row = {}, filter: [string, unknown] | undefined, order: [string, boolean] | undefined, single = false
   // Mirrors row level security. Rows saved before accounts existed (no user_id) stay visible to everyone.
-  const mine = (r: Row) => table === 'profiles' ? r.id === uid() : (r.user_id ?? uid()) === uid()
+  const mine = (r: Row) => table === 'profiles' ? r.id === uid() : table === 'rooms' ? r.organizer_id === uid() : (r.user_id ?? uid()) === uid()
   const run = () => {
     const d = load()
     const match = (r: Row) => mine(r) && (!filter || r[filter[0]] === filter[1])
@@ -66,6 +67,9 @@ function from(table: string) {
   return q
 }
 
+const isMember = (d: Record<string, Row[]>, roomId: string, user: string | null) =>
+  d.room_members.some(m => m.room_id === roomId && m.user_id === user)
+
 // Same behaviour as the SQL functions in supabase/schema.sql.
 async function rpc(fn: string, a: Row) {
   const d = load()
@@ -88,10 +92,55 @@ async function rpc(fn: string, a: Row) {
       d.contacts.push(n)
       return n
     }
-    const cid = add(me, them).id
-    add(them, me)
+    const mineC = add(me, them), theirsC = add(them, me)
+    // Shared room that's live (or ended within a day): file both under it.
+    const now = Date.now()
+    const shared = d.rooms
+      .filter(r => isMember(d, r.id, me.id) && isMember(d, r.id, them.id))
+      .filter(r => now >= +new Date(r.starts_at) - 36e5 && now <= +new Date(r.ends_at) + 864e5)
+      .sort((x, y) => +new Date(y.starts_at) - +new Date(x.starts_at))[0]
+    if (shared) {
+      Object.assign(mineC, { met_where: shared.name, event_id: d.events.find(e => e.user_id === me.id && e.room_id === shared.id)?.id ?? null })
+      Object.assign(theirsC, { met_where: shared.name, event_id: d.events.find(e => e.user_id === them.id && e.room_id === shared.id)?.id ?? null })
+    }
     store(d)
-    return { data: cid, error: null }
+    return { data: mineC.id, error: null }
+  }
+  const roomView = (r: Row) => ({
+    ...r, organizer_name: d.profiles.find(p => p.id === r.organizer_id)?.name ?? null,
+    member_count: d.room_members.filter(m => m.room_id === r.id).length,
+  })
+  if (fn === 'get_room') return { data: d.rooms.filter(r => r.id === a.rid).map(roomView), error: null }
+  if (fn === 'my_rooms') return {
+    data: d.rooms.filter(r => r.organizer_id === uid() || isMember(d, r.id, uid()))
+      .sort((x, y) => +new Date(y.starts_at) - +new Date(x.starts_at)).map(roomView),
+    error: null,
+  }
+  if (fn === 'join_room') {
+    const r = d.rooms.find(x => x.id === a.rid)
+    const fail = (m: string) => ({ data: null, error: new Error(m) })
+    if (!uid()) return fail('Sign in first')
+    if (!d.profiles.some(p => p.id === uid())) return fail('Create your own card first')
+    if (!r) return fail('Room not found')
+    if (Date.now() > +new Date(r.ends_at)) return fail('This room has ended')
+    if (!isMember(d, r.id, uid())) d.room_members.push({ room_id: r.id, user_id: uid(), joined_at: new Date().toISOString() })
+    let ev = d.events.find(e => e.user_id === uid() && e.room_id === r.id)
+    if (!ev) {
+      ev = newRow('events', { name: r.name, date: r.starts_at.slice(0, 10), place: r.place, lat: r.lat, lng: r.lng, room_id: r.id })
+      d.events.push(ev)
+    }
+    store(d)
+    return { data: ev.id, error: null }
+  }
+  if (fn === 'room_people') {
+    const r = d.rooms.find(x => x.id === a.rid)
+    if (!r) return { data: [], error: null }
+    const live = Date.now() >= +new Date(r.starts_at) && Date.now() <= +new Date(r.ends_at)
+    if (r.organizer_id !== uid() && (!isMember(d, r.id, uid()) || !live)) return { data: [], error: null }
+    const people = d.room_members.filter(m => m.room_id === r.id && m.user_id !== uid())
+      .map(m => d.profiles.find(p => p.id === m.user_id)).filter(Boolean)
+      .map(p => ({ user_id: p!.id, name: p!.name, headline: p!.headline ?? null, city: p!.city ?? null, photo_path: p!.photo_path ?? null, is_organizer: p!.id === r.organizer_id }))
+    return { data: people, error: null }
   }
   return { data: null, error: new Error(`Unknown function ${fn}`) }
 }

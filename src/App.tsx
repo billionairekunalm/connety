@@ -23,7 +23,12 @@ type Profile = {
   id: string; name: string; headline: string | null; phone: string | null; email: string | null
   city: string | null; hometown: string | null; help_with: string | null; photo_path: string | null; links: Link[]
 }
-type Ev = { id: string; name: string; date: string | null; place: string | null; lat: number | null; lng: number | null }
+type Ev = { id: string; name: string; date: string | null; place: string | null; lat: number | null; lng: number | null; room_id?: string | null }
+type Room = {
+  id: string; name: string; place: string | null; description: string | null; starts_at: string; ends_at: string
+  organizer_id: string; organizer_name: string | null; member_count: number
+}
+type RoomPerson = { user_id: string; name: string; headline: string | null; city: string | null; photo_path: string | null; is_organizer: boolean }
 type Tab = 'home' | 'people' | 'events' | 'map'
 type Modal =
   | { kind: 'person'; id: string }
@@ -32,6 +37,8 @@ type Modal =
   | { kind: 'newEvent' }
   | { kind: 'me' }
   | { kind: 'editMe' }
+  | { kind: 'room'; id: string }
+  | { kind: 'newRoom' }
   | null
 
 const LEVELS = ['', 'VIMP', 'IMP', 'Normal', 'Low']
@@ -54,6 +61,7 @@ const LinkIcon = ({ l, s = 20 }: { l: Link; s?: number }) => {
   return <span className="brand" style={{ color: k.color }}><Ic n={k.icon} s={s} /></span>
 }
 const PENDING = 'connections-pending-connect' // card id waiting to be connected after login
+const PENDING_ROOM = 'connections-pending-room' // room waiting to be joined after login
 const pub = (path: string | null | undefined) => (path ? supabase.storage.from('avatars').getPublicUrl(path).data.publicUrl : undefined)
 // Links come from other users: force http(s) so a "javascript:" link can never run.
 const safeUrl = (u: string) => (/^https?:\/\//i.test(u) ? u : 'https://' + u.replace(/^[a-z][\w+.-]*:\/*/i, ''))
@@ -66,6 +74,14 @@ const publicOrigin = import.meta.env.VITE_PUBLIC_URL?.replace(/\/$/, '') ||
 // QR + share links use publicOrigin; links tapped on this device stay on this address so its login is kept.
 const cardPath = (id: string) => `/?u=${encodeURIComponent(id)}`
 const cardUrl = (id: string) => publicOrigin + cardPath(id)
+const roomUrl = (id: string) => `${publicOrigin}/?room=${encodeURIComponent(id)}`
+const roomStatus = (r: { starts_at: string; ends_at: string }) =>
+  Date.now() < +new Date(r.starts_at) ? 'upcoming' : Date.now() > +new Date(r.ends_at) ? 'ended' : 'live'
+const until = (iso: string) => { // "2h 15m", "3 days"
+  const m = Math.max(0, Math.round((+new Date(iso) - Date.now()) / 6e4))
+  return m >= 2880 ? `${Math.round(m / 1440)} days` : m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m` : `${m}m`
+}
+const timeOf = (iso: string) => new Date(iso).toLocaleTimeString([], { hour: 'numeric', minute: '2-digit' })
 // crypto.randomUUID only exists on https/localhost; phones on the Wi-Fi address use plain http.
 const uuid = () => crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`
 const nn = (s: string) => s.trim() || null
@@ -149,6 +165,9 @@ const PATHS: Record<string, ReactNode> = {
   portfolio: <><rect x="3" y="7" width="18" height="13" rx="2.5" /><path d="M8.5 7V5.5A1.5 1.5 0 0 1 10 4h4a1.5 1.5 0 0 1 1.5 1.5V7M3 12.5h18" /></>,
   globe: <><circle cx="12" cy="12" r="9" /><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9M12 3c-2.5 2.6-3.8 5.6-3.8 9s1.3 6.4 3.8 9" /></>,
   gallery: <><rect x="3" y="4" width="18" height="16" rx="2" /><circle cx="9" cy="10" r="2" /><path d="M21 16l-5-5-9 9" /></>,
+  clock: <><circle cx="12" cy="12" r="9" /><path d="M12 7v5l3 2" /></>,
+  play: <path d="M8 5v14l11-7z" />,
+  stop: <rect x="6" y="6" width="12" height="12" rx="2" />,
   bell: <path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21a2 2 0 0 0 4 0" />,
   lock: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
 }
@@ -173,8 +192,10 @@ export default function App() {
   }, [uid])
 
   const pid = new URLSearchParams(location.search).get('u')
+  const rid = new URLSearchParams(location.search).get('room')
   if (!ready) return null
   if (pid) return <PublicCard pid={pid} mine={pid === uid} loggedIn={!!uid} />
+  if (rid) return <RoomJoin rid={rid} />
   if (!session || !uid) return <Login />
   if (profile === undefined) return null
   if (!profile) return (
@@ -444,19 +465,22 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
   const flash = (t: string) => { setToast(t); setTimeout(() => setToast(''), 2200) }
 
   const [notes, setNotes] = useState<Note[]>([])
+  const [rooms, setRooms] = useState<Room[]>([])
   const [noteFor, setNoteFor] = useState<Contact>() // who the "how did the call go?" popup is for
 
   // ponytail: loads every note up front; fetch per person if someone logs thousands of calls.
   const load = async () => {
-    const [c, e, n] = await Promise.all([
+    const [c, e, n, r] = await Promise.all([
       supabase.from('contacts').select('*').order('name'),
       supabase.from('events').select('*').order('date', { ascending: false }),
       supabase.from('interactions').select('*').order('created_at', { ascending: false }),
+      supabase.rpc('my_rooms'),
     ])
     if (c.error || e.error) return alert((c.error ?? e.error)!.message)
     setContacts(c.data)
     setEvents(e.data)
     setNotes(n.data ?? [])
+    setRooms((r.data as Room[] | null) ?? [])
     const paths = c.data.flatMap(x => [x.selfie_path, x.card_path]).filter(Boolean) as string[]
     if (paths.length) {
       const { data } = await supabase.storage.from('photos').createSignedUrls(paths, DAY / 1000)
@@ -464,6 +488,20 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
     }
   }
   useEffect(() => { load() }, [])
+
+  // Came here from a room QR: join it (needs a card, which onboarding guarantees) and open it.
+  useEffect(() => {
+    const rid = localStorage.getItem(PENDING_ROOM)
+    if (!rid) return
+    localStorage.removeItem(PENDING_ROOM)
+    supabase.rpc('join_room', { rid }).then(async ({ error }) => {
+      if (error) return alert(error.message)
+      await load()
+      setTab('events')
+      setModal({ kind: 'room', id: rid })
+      flash("🎉 You're in the room")
+    })
+  }, [])
 
   // Came here from someone's QR card: connect both ways, tagged with where we are.
   useEffect(() => {
@@ -688,6 +726,40 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
 
         {tab === 'events' && <>
           <h1 className="big">EVENTS</h1>
+
+          <section className="rooms-hero press" onClick={() => setModal({ kind: 'newRoom' })}>
+            <span className="tag">✨ Event rooms</span>
+            <h2>Hosting an<br />event?</h2>
+            <p>Create a room with one QR. Guests scan it to join and see who's here while the event is on.</p>
+            <span className="hero-btn"><Ic n="plus" s={18} /> Create a room</span>
+            <i className="shape s1" /><i className="shape s2" />
+          </section>
+
+          {rooms.length > 0 && (
+            <div className="room-list">
+              {rooms.map((r, i) => {
+                const st = roomStatus(r)
+                return (
+                  <button key={r.id} className={`room-card press ${st}`} style={{ animationDelay: `${i * 45}ms` }}
+                    onClick={() => setModal({ kind: 'room', id: r.id })}>
+                    <span className={`status ${st}`}>
+                      {st === 'live' ? `● Live · ends in ${until(r.ends_at)}` : st === 'upcoming' ? `Opens in ${until(r.starts_at)}` : 'Ended'}
+                    </span>
+                    <b>{r.name}</b>
+                    <span className="small">
+                      {fmt(new Date(r.starts_at), { day: 'numeric', month: 'short' })} · {timeOf(r.starts_at)}–{timeOf(r.ends_at)}
+                      {r.place && ` · ${r.place}`}
+                    </span>
+                    <span className="room-meta">
+                      <span><Ic n="people" s={14} /> {r.member_count}</span>
+                      {r.organizer_id === uid && <span className="host-tag">You host</span>}
+                    </span>
+                  </button>
+                )
+              })}
+            </div>
+          )}
+          <h3 className="section-label">Your events</h3>
           <div className="bento">
             {events.map((e, i) => {
               const ppl = contacts.filter(c => c.event_id === e.id)
@@ -728,7 +800,7 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
       {noteFor && <CallNote c={noteFor} onSave={(b, f, n) => saveNote(noteFor, b, f, n)} onClose={() => setNoteFor(undefined)} />}
 
       {m && (
-        <div className="sheet" style={{ '--c': person ? COLORS[person.importance] : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
+        <div className="sheet" style={{ '--c': person ? COLORS[person.importance] : m.kind === 'room' ? '#ffc145' : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
           <div className="sheet-top">
             <button className="circle white press" onClick={() => setModal(null)} aria-label="Back"><Ic n="back" /></button>
             {person && <button className="circle white press" onClick={() => setModal({ kind: 'edit', c: person })} aria-label="Edit"><Ic n="edit" s={20} /></button>}
@@ -870,6 +942,9 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
                 setModal(null); load()
               }}>Delete event</button>
               <div className="cta">
+                {event.room_id && rooms.some(r => r.id === event.room_id) && (
+                  <button className="btn-ghost press room-link" onClick={() => setModal({ kind: 'room', id: event.room_id! })}>✨ Open event room</button>
+                )}
                 <button className="btn-black press" onClick={() => setModal({ kind: 'edit', eventId: event.id })}><Ic n="plus" s={18} /> Add person met here</button>
               </div>
             </div>
@@ -881,6 +956,20 @@ function Home({ uid, profile, setProfile }: { uid: string; profile: Profile; set
           )}
 
           {m.kind === 'newEvent' && <EventForm done={() => { load(); flash('Event created ✓'); setModal(null); setTab('events') }} />}
+
+          {m.kind === 'newRoom' && (
+            <RoomForm done={async id => { await load(); flash('🎉 Room created'); setModal({ kind: 'room', id }) }} />
+          )}
+
+          {m.kind === 'room' && (() => {
+            const room = rooms.find(r => r.id === m.id)
+            if (!room) return <div className="detail"><div className="empty-card">Room not found.</div></div>
+            const myEvent = events.find(e => e.room_id === room.id)
+            return (
+              <RoomView room={room} uid={uid} contacts={contacts} metHere={myEvent ? contacts.filter(c => c.event_id === myEvent.id).length : 0}
+                onOpen={open} onShowMyQr={() => setModal({ kind: 'me' })} onChanged={load} onDeleted={() => { setModal(null); load() }} flash={flash} />
+            )
+          })()}
         </div>
       )}
     </div>
@@ -1110,6 +1199,215 @@ function PhotoTile({ label, icon, capture, file, url, onFile, crop }: {
           <Ic n="gallery" s={16} /> Gallery
           <input type="file" accept="image/*" hidden onChange={pick} />
         </label>
+      </div>
+    </div>
+  )
+}
+
+// ---------- Event rooms ----------
+
+function RoomForm({ done }: { done: (id: string) => void }) {
+  const nextHour = new Date(); nextHour.setMinutes(0, 0, 0); nextHour.setHours(nextHour.getHours() + 1)
+  const hhmm = (d: Date) => `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const [f, setF] = useState({
+    name: '', place: '', description: '', date: isoDay(nextHour),
+    start: hhmm(nextHour), end: hhmm(new Date(+nextHour + 3 * 36e5)),
+  })
+  const [loc, setLoc] = useState<{ lat: number; lng: number } | null>(null)
+  const [busy, setBusy] = useState(false)
+  useEffect(() => { here().then(setLoc) }, [])
+  const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
+  const starts = new Date(`${f.date}T${f.start}`)
+  let ends = new Date(`${f.date}T${f.end}`)
+  if (ends <= starts) ends = new Date(+ends + DAY) // ends after midnight
+  const hours = Math.round((+ends - +starts) / 36e5 * 10) / 10
+
+  const save = async () => {
+    setBusy(true)
+    try {
+      const { data, error } = await supabase.from('rooms').insert({
+        name: f.name.trim(), place: nn(f.place), description: nn(f.description),
+        starts_at: starts.toISOString(), ends_at: ends.toISOString(), lat: loc?.lat ?? null, lng: loc?.lng ?? null,
+      }).select().single()
+      if (error) throw error
+      const j = await supabase.rpc('join_room', { rid: data.id }) // the host is a member too
+      if (j.error) throw j.error
+      done(data.id)
+    } catch (e) { alert((e as Error).message); setBusy(false) }
+  }
+
+  return (
+    <form className="detail" onSubmit={e => { e.preventDefault(); save() }}>
+      <h1 className="big">CREATE A<br />ROOM</h1>
+      <p className="muted intro">Guests scan one QR to join. While the room is open they see who's here, and connect by scanning each other's cards.</p>
+      <label>Event name *<input required value={f.name} onChange={set('name')} placeholder="Startup Summit 2026" /></label>
+      <label>Place<input value={f.place} onChange={set('place')} placeholder="Bengaluru Palace, Hall B" /></label>
+      <label>Date<input type="date" required value={f.date} onChange={set('date')} /></label>
+      <div className="two">
+        <label>Room opens<input type="time" required value={f.start} onChange={set('start')} /></label>
+        <label>Room closes<input type="time" required value={f.end} onChange={set('end')} /></label>
+      </div>
+      <p className="muted small window-hint">
+        <Ic n="clock" s={14} /> Guests can see each other for {hours} hours, {fmt(starts, { weekday: 'short', day: 'numeric', month: 'short' })} {timeOf(starts.toISOString())} – {timeOf(ends.toISOString())}
+      </p>
+      <label>About the event<textarea rows={3} value={f.description} onChange={set('description')} placeholder="Founders, investors and builders. Say hi to 3 new people!" /></label>
+      <div className="cta"><button className="btn-black press" disabled={busy}>{busy ? 'Creating…' : 'Create room & get QR'}</button></div>
+    </form>
+  )
+}
+
+function RoomView({ room, uid, contacts, metHere, onOpen, onShowMyQr, onChanged, onDeleted, flash }: {
+  room: Room; uid: string; contacts: Contact[]; metHere: number
+  onOpen: (contactId: string) => void; onShowMyQr: () => void; onChanged: () => void; onDeleted: () => void; flash: (t: string) => void
+}) {
+  const [people, setPeople] = useState<RoomPerson[]>()
+  const [, tick] = useState(0)
+  const host = room.organizer_id === uid
+  const st = roomStatus(room)
+  // Refresh who's here every 20s while the room is open, and keep countdowns ticking.
+  useEffect(() => {
+    const get = () => supabase.rpc('room_people', { rid: room.id }).then(({ data }) => setPeople((data as RoomPerson[] | null) ?? []))
+    get()
+    const t = setInterval(() => { tick(n => n + 1); if (roomStatus(room) === 'live' || host) get() }, 20000)
+    return () => clearInterval(t)
+  }, [room.id, room.starts_at, room.ends_at])
+
+  const setTimes = async (patch: { starts_at?: string; ends_at?: string }, msg: string) => {
+    const { error } = await supabase.from('rooms').update(patch).eq('id', room.id)
+    if (error) return alert(error.message)
+    flash(msg); onChanged()
+  }
+  const share = async () => {
+    const url = roomUrl(room.id)
+    try {
+      if (navigator.share) await navigator.share({ title: room.name, text: `Join ${room.name} on Connections`, url })
+      else { await navigator.clipboard.writeText(url); flash('Room link copied ✓') }
+    } catch { /* share sheet closed */ }
+  }
+  const contactFor = (p: RoomPerson) => contacts.find(c => c.profile_id === p.user_id)
+  const others = people ?? []
+
+  return (
+    <div className="detail room">
+      <span className={`status big-status ${st}`}>
+        {st === 'live' ? `● Live now · closes in ${until(room.ends_at)}` : st === 'upcoming' ? `Opens in ${until(room.starts_at)}` : 'This room has ended'}
+      </span>
+      <h1 className="big">{room.name}</h1>
+      <div className="pills">
+        <span className="pill dark"><Ic n="clock" s={13} /> {fmt(new Date(room.starts_at), { weekday: 'short', day: 'numeric', month: 'short' })} · {timeOf(room.starts_at)}–{timeOf(room.ends_at)}</span>
+        {room.place && <span className="pill"><Ic n="pin" s={13} /> {room.place}</span>}
+        <span className="pill"><Ic n="people" s={13} /> {room.member_count} joined</span>
+        {!host && room.organizer_name && <span className="pill">Host: {room.organizer_name}</span>}
+      </div>
+      {room.description && <div className="panel"><p className="pre">{room.description}</p></div>}
+
+      {host && st !== 'ended' && (
+        <div className="qr-box room-qr">
+          <QR text={roomUrl(room.id)} />
+          <b>Scan to join {room.name}</b>
+          <span className="muted small">Show this on a screen or print it at the entrance.</span>
+        </div>
+      )}
+      <div className="quick">
+        {st !== 'ended' && <button className="press" onClick={share}><span className="circle"><Ic n="share" /></span>Invite</button>}
+        {st === 'live' && <button className="press" onClick={onShowMyQr}><span className="circle"><Ic n="qr" /></span>My QR</button>}
+        {host && st === 'upcoming' && <button className="press" onClick={() => setTimes({ starts_at: new Date().toISOString() }, 'Room is open 🎉')}><span className="circle"><Ic n="play" /></span>Open now</button>}
+        {host && st === 'live' && <button className="press" onClick={() => setTimes({ ends_at: new Date(+new Date(room.ends_at) + 36e5).toISOString() }, '+1 hour ✓')}><span className="circle"><Ic n="clock" /></span>+1 hour</button>}
+        {host && st !== 'ended' && <button className="press" onClick={() => confirm('Close the room now? Guests will stop seeing each other.') && setTimes(st === 'upcoming' // closing before it opened: the end must still come after the start
+            ? { starts_at: new Date(Date.now() - 6e4).toISOString(), ends_at: new Date().toISOString() }
+            : { ends_at: new Date().toISOString() }, 'Room closed')}><span className="circle"><Ic n="stop" /></span>End now</button>}
+        {host && <button className="press" onClick={async () => {
+          if (!confirm(`Delete ${room.name}? Guests keep the people they connected with.`)) return
+          await supabase.from('rooms').delete().eq('id', room.id); onDeleted()
+        }}><span className="circle"><Ic n="trash" /></span>Delete</button>}
+      </div>
+
+      {st === 'upcoming' && !host && (
+        <div className="empty-card">
+          <b>The room opens in {until(room.starts_at)}</b><br />
+          {room.member_count} {room.member_count === 1 ? 'person has' : 'people have'} joined. You'll see everyone here once it opens.
+        </div>
+      )}
+
+      {st === 'ended' && (
+        <div className="empty-card">
+          <b>The room has closed</b><br />
+          You connected with {metHere} {metHere === 1 ? 'person' : 'people'} here. Find them under this event in your Events tab.
+        </div>
+      )}
+
+      {(st === 'live' || (host && st === 'upcoming')) && (
+        <>
+          <div className="section-title">
+            <h3>{st === 'live' ? "Who's here" : 'Joined so far'}</h3>
+            <span className="muted small">{others.length} {others.length === 1 ? 'person' : 'people'}</span>
+          </div>
+          {st === 'live' && (
+            <p className="muted small room-tip">Only photo, name and headline are shown. Scan each other's QR to swap full details.</p>
+          )}
+          {people === undefined
+            ? <div className="empty-card">Loading…</div>
+            : others.length === 0
+              ? <div className="empty-card">Nobody else yet. Share the QR to get people in.</div>
+              : <div className="room-people">
+                  {others.map((p, i) => {
+                    const c = contactFor(p)
+                    return (
+                      <button key={p.user_id} className={`room-person press ${c ? 'connected' : ''}`} style={{ animationDelay: `${i * 40}ms` }}
+                        onClick={() => c ? onOpen(c.id) : flash(`Ask ${p.name.split(' ')[0]} to show their QR, then scan it to connect`)}>
+                        <span className="rp-photo">{p.photo_path ? <img src={pub(p.photo_path)} alt="" /> : p.name[0]?.toUpperCase()}</span>
+                        <b>{p.name}</b>
+                        {p.headline && <span className="small">{p.headline}</span>}
+                        {p.city && <span className="small muted">📍 {p.city}</span>}
+                        <span className={`rp-tag ${c ? 'ok' : ''}`}>{c ? '✓ Connected' : p.is_organizer ? 'Host' : 'Scan to connect'}</span>
+                      </button>
+                    )
+                  })}
+                </div>}
+        </>
+      )}
+    </div>
+  )
+}
+
+// What someone sees after scanning a room QR: the event, not the guest list.
+function RoomJoin({ rid }: { rid: string }) {
+  const [r, setR] = useState<Room | null>()
+  useEffect(() => { supabase.rpc('get_room', { rid }).then(({ data }) => setR((data as Room[] | null)?.[0] ?? null)) }, [rid])
+  if (r === undefined) return null
+  if (!r) return <div className="app"><div className="empty-card">This room doesn't exist anymore.</div></div>
+  const st = roomStatus(r)
+  return (
+    <div className="sheet" style={{ '--c': '#ffc145' } as CSSProperties}>
+      <div className="detail public room">
+        <span className="tag">✨ Event room</span>
+        <span className={`status big-status ${st}`}>
+          {st === 'live' ? `● Live now · closes in ${until(r.ends_at)}` : st === 'upcoming' ? `Opens in ${until(r.starts_at)}` : 'This room has ended'}
+        </span>
+        <h1 className="big">{r.name}</h1>
+        <div className="pills">
+          <span className="pill dark"><Ic n="clock" s={13} /> {fmt(new Date(r.starts_at), { weekday: 'short', day: 'numeric', month: 'short' })} · {timeOf(r.starts_at)}–{timeOf(r.ends_at)}</span>
+          {r.place && <span className="pill"><Ic n="pin" s={13} /> {r.place}</span>}
+          {r.organizer_name && <span className="pill">Host: {r.organizer_name}</span>}
+        </div>
+        {r.description && <div className="panel"><p className="pre">{r.description}</p></div>}
+        <div className="join-count">
+          <b>{r.member_count}</b>
+          <span>{r.member_count === 1 ? 'person has' : 'people have'} joined</span>
+        </div>
+        <ul className="join-how">
+          <li>See who's at the event while the room is open</li>
+          <li>Scan each other's QR to swap full details</li>
+          <li>Everyone you meet is saved under this event</li>
+        </ul>
+        <div className="cta">
+          {st === 'ended'
+            ? <a className="btn-ghost press" href="/">The room has closed · open the app</a>
+            : <button className="btn-black press" onClick={() => { localStorage.setItem(PENDING_ROOM, rid); location.href = '/' }}>
+                <Ic n="plus" s={18} /> Join the room
+              </button>}
+        </div>
+        <p className="muted small center made">Made with Connections · only for people you actually meet</p>
       </div>
     </div>
   )
