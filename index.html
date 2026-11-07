@@ -57,7 +57,8 @@
       // Show once per visit; skip for scanned card/room links so visitors see the page straight away.
       // Hides when the app calls hideSplash(), but never before the animation has had time to play.
       (function () {
-        var s = document.getElementById('splash'), MIN = 1250, t0 = Date.now(), done = false
+        // MIN = when the fade-out starts; the 0.3s fade then brings the total to about 2 seconds.
+        var s = document.getElementById('splash'), MIN = 1700, t0 = Date.now(), done = false
         function remove() { s.classList.add('out'); setTimeout(function () { s.remove() }, 400) }
         var skip = /[?&](u|room)=/.test(location.search)
         try { skip = skip || sessionStorage.getItem('splash-seen') === '1'; sessionStorage.setItem('splash-seen', '1') } catch (e) {}
