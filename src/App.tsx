@@ -10,6 +10,7 @@ import { Av } from './faces'
 const Intro = lazy(() => import('./Intro')) // only first-time visitors download this
 import { COUNTRIES, byCode, flag, fullNumber, guessCountry, splitNumber, waDigits } from './countries'
 import { canPrompt, isIOS, isInstalled, isStandalone, onInstallChange, promptInstall, pushNeedsInstall, pushSupported, subscribePush } from './pwa'
+import { scanSupported, startScan } from './scanner'
 
 type Contact = {
   id: string; event_id: string | null; profile_id: string | null; name: string; phone: string | null
@@ -53,6 +54,7 @@ type Modal =
   | { kind: 'newRoom' }
   | { kind: 'post'; id: string }
   | { kind: 'newPost' }
+  | { kind: 'scan' }
   | { kind: 'settings' }
   | null
 
@@ -413,6 +415,49 @@ function QR({ text }: { text: string }) {
   const [src, setSrc] = useState<string>()
   useEffect(() => { QRCode.toDataURL(text, { margin: 1, width: 560, errorCorrectionLevel: 'M' }).then(setSrc) }, [text])
   return src ? <img className="qr" src={src} alt="QR code for your card" /> : <div className="qr" />
+}
+
+// Scan someone's card or room QR without leaving the app. Only acts on our own /?u=/?room= links —
+// anything else is just ignored so a stray QR code in frame doesn't navigate anywhere unexpected.
+function Scanner() {
+  const videoRef = useRef<HTMLVideoElement>(null)
+  const [error, setError] = useState('')
+
+  useEffect(() => {
+    if (!scanSupported()) { setError("This browser can't open the camera here. Use your phone's camera app to scan instead.") ; return }
+    let stop: (() => void) | undefined
+    let cancelled = false
+    const onText = (text: string) => {
+      let url: URL
+      try { url = new URL(text) } catch { return } // not a URL; keep scanning
+      // Origin check matters here, not just shape: a QR crafted to look like ours but pointing at
+      // another host (with a matching ?u=/?room= param) must never get an automatic navigation.
+      if (url.origin !== location.origin || url.pathname !== '/' || !(url.searchParams.get('u') || url.searchParams.get('room'))) return
+      stop?.()
+      location.href = text
+    }
+    startScan(videoRef.current!, onText)
+      .then(s => { if (cancelled) s(); else stop = s })
+      .catch((e: Error) => setError(
+        e.name === 'NotAllowedError' ? 'Camera access was denied. Allow it for this site in your browser settings to scan.' : "Couldn't open the camera.",
+      ))
+    return () => { cancelled = true; stop?.() }
+  }, [])
+
+  return (
+    <div className="detail scanner">
+      <h1 className="big">SCAN A<br />QR CODE</h1>
+      {error
+        ? <div className="empty-card">{error}</div>
+        : <>
+            <div className="scan-box">
+              <video ref={videoRef} playsInline muted />
+              <i className="scan-frame" />
+            </div>
+            <p className="muted small center">Point your camera at a card or room QR code</p>
+          </>}
+    </div>
+  )
 }
 
 function ProfileForm({ uid, email, p, onboarding, done, defaultName = '' }: {
@@ -948,6 +993,7 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
               <b>Hello, {name}</b>
               <div className="muted small">Today {fmt(new Date(), { day: 'numeric', month: 'short' })}</div>
             </div>
+            <button className="circle white press" onClick={() => setModal({ kind: 'scan' })} aria-label="Scan a QR code"><Ic n="camera" s={20} /></button>
             <button className="circle white press" onClick={() => setModal({ kind: 'me' })} aria-label="Show my QR"><Ic n="qr" s={20} /></button>
             <button className="circle white press" onClick={() => { setTab('people'); setTimeout(() => searchRef.current?.focus(), 50) }} aria-label="Search">
               <Ic n="search" s={20} />
@@ -1134,7 +1180,7 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
       {noteFor && <CallNote c={noteFor} onSave={(b, f, n) => saveNote(noteFor, b, f, n)} onClose={() => setNoteFor(undefined)} />}
 
       {m && (
-        <div className="sheet" style={{ '--c': person ? catColor(person.importance) : m.kind === 'room' ? '#ffc145' : m.kind === 'post' ? '#c9e27f' : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
+        <div className="sheet" style={{ '--c': person ? catColor(person.importance) : m.kind === 'room' ? '#ffc145' : m.kind === 'post' ? '#c9e27f' : m.kind === 'scan' ? '#111111' : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
           <div className="sheet-top">
             <button className="circle white press" onClick={() => setModal(null)} aria-label="Back"><Ic n="back" /></button>
             {person && <button className="circle white press" onClick={() => setModal({ kind: 'edit', c: person })} aria-label="Edit"><Ic n="edit" s={20} /></button>}
@@ -1291,6 +1337,8 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
             <Settings uid={uid} profile={profile} setProfile={setProfile} cats={cats} setCats={setCats} contacts={contacts}
               push={push} enableReminders={enableReminders} onContactsChanged={load} flash={flash} />
           )}
+
+          {m.kind === 'scan' && <Scanner />}
 
           {m.kind === 'newRoom' && (
             <RoomForm done={async id => { await load(); flash('🎉 Room created'); setModal({ kind: 'room', id }) }} />
