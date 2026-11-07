@@ -9,7 +9,7 @@ import { parseCard } from './cardscan'
 import { Av } from './faces'
 const Intro = lazy(() => import('./Intro')) // only first-time visitors download this
 import { COUNTRIES, byCode, flag, fullNumber, guessCountry, splitNumber, waDigits } from './countries'
-import { canPrompt, isIOS, isStandalone, onInstallChange, promptInstall, pushNeedsInstall, pushSupported, subscribePush } from './pwa'
+import { canPrompt, isIOS, isInstalled, isStandalone, onInstallChange, promptInstall, pushNeedsInstall, pushSupported, subscribePush } from './pwa'
 
 type Contact = {
   id: string; event_id: string | null; profile_id: string | null; name: string; phone: string | null
@@ -257,6 +257,23 @@ export default function App() {
   return <Home uid={uid} profile={profile} setProfile={setProfile} cats={cats} setCats={setCats} />
 }
 
+// Shown on a scanned link that opened in the plain browser, when this device already has the app
+// installed. iOS gives Safari no way to hand off to an installed home-screen app, so skip it there —
+// Android can offer "Open supported links" for the installed app; this link gives that its best shot.
+function OpenInAppBanner() {
+  if (isStandalone() || isIOS || !isInstalled()) return null
+  return (
+    <div className="remind-card">
+      <span className="circle"><Ic n="download" /></span>
+      <div className="grow">
+        <b>You have Connections installed</b>
+        <span className="small">Open this link in the app instead</span>
+      </div>
+      <a className="chip press on" href={location.href}>Open</a>
+    </div>
+  )
+}
+
 // What someone sees after scanning a QR. Anyone can view the card; saving needs an account.
 function PublicCard({ pid, mine, loggedIn }: { pid: string; mine: boolean; loggedIn: boolean }) {
   const [p, setP] = useState<Profile | null>()
@@ -288,6 +305,7 @@ function PublicCard({ pid, mine, loggedIn }: { pid: string; mine: boolean; logge
   return (
     <div className="sheet" style={{ '--c': '#a99bff' } as CSSProperties}>
       <div className="detail public">
+        <OpenInAppBanner />
         <CardView p={p} />
         <div className="cta">
           {mine
@@ -1842,6 +1860,7 @@ function RoomJoin({ rid }: { rid: string }) {
   return (
     <div className="sheet" style={{ '--c': '#ffc145' } as CSSProperties}>
       <div className="detail public room">
+        <OpenInAppBanner />
         <span className="tag">✨ Event room</span>
         <span className={`status big-status ${st}`}>
           {st === 'live' ? `● Live now · closes in ${until(r.ends_at)}` : st === 'upcoming' ? `Opens in ${until(r.starts_at)}` : 'This room has ended'}

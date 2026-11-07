@@ -4,13 +4,22 @@ let deferred: any = null
 const subs = new Set<() => void>()
 const notify = () => subs.forEach(f => f())
 
-window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; notify() })
-window.addEventListener('appinstalled', () => { deferred = null; notify() })
-if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
-
 export const isStandalone = () =>
   matchMedia('(display-mode: standalone)').matches || (navigator as any).standalone === true
 export const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent)
+
+// Remembers "this device has the app installed" so a later tab (e.g. a scanned QR link opening
+// in the plain browser) can offer to hand off to it. Set when our own install prompt succeeds,
+// and opportunistically whenever we notice we're actually running standalone right now.
+const INSTALLED_KEY = 'pwa-installed'
+const markInstalled = () => { try { localStorage.setItem(INSTALLED_KEY, '1') } catch { /* private mode */ } }
+export const isInstalled = () => { try { return localStorage.getItem(INSTALLED_KEY) === '1' } catch { return false } }
+if (isStandalone()) markInstalled()
+
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); deferred = e; notify() })
+window.addEventListener('appinstalled', () => { deferred = null; markInstalled(); notify() })
+if ('serviceWorker' in navigator) navigator.serviceWorker.register('/sw.js').catch(() => {})
+
 export const canPrompt = () => !!deferred
 export const onInstallChange = (f: () => void) => { subs.add(f); return () => { subs.delete(f) } }
 

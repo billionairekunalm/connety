@@ -3,6 +3,7 @@
   "short_name": "Connections",
   "description": "Remember everyone you meet. Stay in touch.",
   "start_url": "/",
+  "scope": "/",
   "display": "standalone",
   "background_color": "#efeaff",
   "theme_color": "#efeaff",
