@@ -1344,7 +1344,7 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
           )}
 
           {m.kind === 'edit' && (
-            <PersonForm uid={uid} c={m.c} eventId={m.eventId} events={events} urls={urls}
+            <PersonForm uid={uid} c={m.c} eventId={m.eventId} events={events} contacts={contacts} urls={urls}
               done={id => { load(); flash(m.c ? 'Saved ✓' : 'Person added ✓'); setModal(id ? { kind: 'person', id } : null) }} />
           )}
 
@@ -1453,8 +1453,8 @@ function PeopleMap({ contacts, events, onOpen, tall }: { contacts: Contact[]; ev
   )
 }
 
-function PersonForm({ uid, c, eventId, events, urls, done }: {
-  uid: string; c?: Contact; eventId?: string; events: Ev[]; urls: Record<string, string>; done: (id?: string) => void
+function PersonForm({ uid, c, eventId, events, contacts, urls, done }: {
+  uid: string; c?: Contact; eventId?: string; events: Ev[]; contacts: Contact[]; urls: Record<string, string>; done: (id?: string) => void
 }) {
   const [f, setF] = useState({
     name: c?.name ?? '', phone: splitNumber(c?.phone, MY_COUNTRY).national, email: c?.email ?? '', company: c?.company ?? '', current_city: c?.current_city ?? '', hometown: c?.hometown ?? '', met_where: c?.met_where ?? '', help_note: c?.help_note ?? '', birthday: c?.birthday ?? '',
@@ -1499,12 +1499,26 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
     setBusy(true)
     try {
       const ev = events.find(e => e.id === f.event_id)
+      const phone = fullNumber(phoneCountry, f.phone)
+      const email = nn(f.email)
+      // Same number or email already saved: offer to merge into them instead of a silent duplicate.
+      const dupe = !c && contacts.find(x => (phone && x.phone === phone) || (email && x.email?.toLowerCase() === email.toLowerCase()))
       const row = {
-        ...f, event_id: f.event_id || null, phone: fullNumber(phoneCountry, f.phone), email: nn(f.email), company: nn(f.company), current_city: nn(f.current_city), hometown: nn(f.hometown), birthday: f.birthday || null,
+        ...f, event_id: f.event_id || null, phone, email, company: nn(f.company), current_city: nn(f.current_city), hometown: nn(f.hometown), birthday: f.birthday || null,
         contact_every_days: Math.max(1, +f.contact_every_days || 30),
         lat: loc?.lat ?? ev?.lat ?? null, lng: loc?.lng ?? ev?.lng ?? null,
         ...(selfie && { selfie_path: await upload(uid, selfie) }),
         ...(card && { card_path: await upload(uid, card) }),
+      }
+      // Cancel means "add anyway" (e.g. two different people sharing an office line), not "do nothing" —
+      // otherwise there'd be no way past this prompt once the phone/email genuinely matches on purpose.
+      if (dupe && confirm(`${dupe.name} is already in your list with this ${dupe.phone === phone ? 'number' : 'email'}. Merge into them instead of adding a duplicate?`)) {
+        // Keep whatever the existing contact already has; fill in only what was blank on them.
+        const merged = Object.fromEntries(Object.entries(row).map(([k, v]) => [k, (dupe as unknown as Record<string, unknown>)[k] || v]))
+        const { data, error } = await supabase.from('contacts').update(merged).eq('id', dupe.id).select().single()
+        if (error) throw error
+        done(data.id)
+        return
       }
       const { data, error } = c
         ? await supabase.from('contacts').update(row).eq('id', c.id).select().single()
