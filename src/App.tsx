@@ -16,7 +16,7 @@ type Contact = {
   id: string; event_id: string | null; profile_id: string | null; name: string; phone: string | null
   email: string | null; company: string | null; hometown: string | null; current_city: string | null
   next_call_at: string | null // a date picked after a call; overrides "call every X days"
-  met_where: string | null; help_note: string | null; importance: number
+  met_where: string | null; help_note: string | null; importance: number; birthday: string | null
   contact_every_days: number; last_contacted_at: string
   selfie_path: string | null; card_path: string | null; avatar_path: string | null
   lat: number | null; lng: number | null
@@ -138,6 +138,10 @@ const dueText = (c: Contact) => {
 }
 const ago = (iso: string) => Math.floor((Date.now() - new Date(iso).getTime()) / DAY)
 const fmt = (d: Date, o: Intl.DateTimeFormatOptions) => d.toLocaleDateString('en-GB', o)
+const isBirthdayToday = (date: string) => {
+  const b = new Date(date + 'T00:00:00'), t = new Date()
+  return b.getMonth() === t.getMonth() && b.getDate() === t.getDate()
+}
 
 const here = () =>
   new Promise<{ lat: number; lng: number } | null>(res =>
@@ -948,6 +952,7 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
   // The graveyard sits apart: not in Today's calls or the main list until revived with a call.
   const alive = contacts.filter(c => !inGrave(c))
   const grave = contacts.filter(inGrave)
+  const birthdaysToday = contacts.filter(c => c.birthday && isBirthdayToday(c.birthday))
   const today = alive.filter(c => bucket(c) === 0)
   const dayPeople = alive.filter(c => bucket(c) === day).sort((a, b) => a.importance - b.importance || dueIn(a) - dueIn(b))
   const ql = q.toLowerCase()
@@ -1033,6 +1038,16 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
               </div>
               {!pushNeedsInstall() && Notification.permission !== 'denied' &&
                 <button className="chip press on" onClick={enableReminders}>Turn on</button>}
+            </div>
+          )}
+
+          {birthdaysToday.length > 0 && (
+            <div className="remind-card">
+              <span className="circle" style={{ background: '#ffc145' }}>🎂</span>
+              <div className="grow">
+                <b>{birthdaysToday.length === 1 ? `${birthdaysToday[0].name}'s birthday today!` : `${birthdaysToday.length} birthdays today!`}</b>
+                <span className="small">{birthdaysToday.map(c => c.name).join(', ')}</span>
+              </div>
             </div>
           )}
 
@@ -1226,6 +1241,8 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
                 <span className="pill dark">{catName(person.importance)}</span>
                 {(person.met_where || evName(person.event_id)) &&
                   <span className="pill"><Ic n="pin" s={14} /> {[person.met_where, evName(person.event_id)].filter(Boolean).join(' · ')}</span>}
+                {person.birthday &&
+                  <span className={`pill ${isBirthdayToday(person.birthday) ? 'red' : ''}`}>🎂 {fmt(new Date(person.birthday + 'T00:00:00'), { day: 'numeric', month: 'short' })}</span>}
               </div>
               <div className="pills center-row">
                 {person.next_call_at
@@ -1440,7 +1457,7 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
   uid: string; c?: Contact; eventId?: string; events: Ev[]; urls: Record<string, string>; done: (id?: string) => void
 }) {
   const [f, setF] = useState({
-    name: c?.name ?? '', phone: splitNumber(c?.phone, MY_COUNTRY).national, email: c?.email ?? '', company: c?.company ?? '', current_city: c?.current_city ?? '', hometown: c?.hometown ?? '', met_where: c?.met_where ?? '', help_note: c?.help_note ?? '',
+    name: c?.name ?? '', phone: splitNumber(c?.phone, MY_COUNTRY).national, email: c?.email ?? '', company: c?.company ?? '', current_city: c?.current_city ?? '', hometown: c?.hometown ?? '', met_where: c?.met_where ?? '', help_note: c?.help_note ?? '', birthday: c?.birthday ?? '',
     importance: c?.importance ?? 2, contact_every_days: c?.contact_every_days ?? 30, event_id: c?.event_id ?? eventId ?? '',
   })
   const [phoneCountry, setPhoneCountry] = useState(splitNumber(c?.phone, MY_COUNTRY).country)
@@ -1483,7 +1500,7 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
     try {
       const ev = events.find(e => e.id === f.event_id)
       const row = {
-        ...f, event_id: f.event_id || null, phone: fullNumber(phoneCountry, f.phone), email: nn(f.email), company: nn(f.company), current_city: nn(f.current_city), hometown: nn(f.hometown),
+        ...f, event_id: f.event_id || null, phone: fullNumber(phoneCountry, f.phone), email: nn(f.email), company: nn(f.company), current_city: nn(f.current_city), hometown: nn(f.hometown), birthday: f.birthday || null,
         contact_every_days: Math.max(1, +f.contact_every_days || 30),
         lat: loc?.lat ?? ev?.lat ?? null, lng: loc?.lng ?? ev?.lng ?? null,
         ...(selfie && { selfie_path: await upload(uid, selfie) }),
@@ -1533,6 +1550,7 @@ function PersonForm({ uid, c, eventId, events, urls, done }: {
         <label>Lives in<input value={f.current_city} onChange={set('current_city')} placeholder="Pune" /></label>
         <label>Hometown<input value={f.hometown} onChange={set('hometown')} placeholder="Nagpur" /></label>
       </div>
+      <label>Birthday<input type="date" value={f.birthday} onChange={set('birthday')} /></label>
       <label>Event
         <select value={f.event_id} onChange={set('event_id')}>
           <option value="">None</option>

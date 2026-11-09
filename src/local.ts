@@ -10,7 +10,7 @@ const uid = () => { const e = localStorage.getItem(KEY + '-user'); return e ? 'l
 const defaults: Record<string, () => Row> = {
   contacts: () => ({
     last_contacted_at: new Date().toISOString(), event_id: null, profile_id: null, email: null, company: null, hometown: null, current_city: null, next_call_at: null, selfie_path: null, card_path: null,
-    avatar_path: null, lat: null, lng: null, importance: 2, contact_every_days: 30, phone: null, met_where: null, help_note: null,
+    avatar_path: null, lat: null, lng: null, importance: 2, contact_every_days: 30, phone: null, met_where: null, help_note: null, birthday: null,
   }),
   events: () => ({}),
   interactions: () => ({ kind: 'call', format: 'note' }),

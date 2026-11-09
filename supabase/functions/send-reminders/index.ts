@@ -27,30 +27,40 @@ Deno.serve(async req => {
   webpush.setVapidDetails(Deno.env.get('VAPID_SUBJECT')!, Deno.env.get('VAPID_PUBLIC_KEY')!, Deno.env.get('VAPID_PRIVATE_KEY')!)
 
   let subsQ = db.from('push_subscriptions').select('*')
-  let contactsQ = db.from('contacts').select('user_id, name, importance, last_contacted_at, contact_every_days, next_call_at')
+  let contactsQ = db.from('contacts').select('user_id, name, importance, last_contacted_at, contact_every_days, next_call_at, birthday')
   if (onlyUser) { subsQ = subsQ.eq('user_id', onlyUser); contactsQ = contactsQ.eq('user_id', onlyUser) }
   const [{ data: subs }, { data: contacts }] = await Promise.all([subsQ, contactsQ])
 
+  const now = new Date()
   const due = new Map<string, { name: string; importance: number }[]>()
+  const birthdays = new Map<string, string[]>()
   for (const c of contacts ?? []) {
     const last = new Date(c.last_contacted_at).getTime()
     // A date picked after a call wins; otherwise "call every X days". Same rule as the app.
-    const due = c.next_call_at ? new Date(c.next_call_at).getTime() : last + c.contact_every_days * DAY
-    if (due > Date.now()) continue
-    if (Date.now() - last > GRAVE_DAYS * DAY) continue // in the graveyard: no daily nagging, matches the app
-    due.set(c.user_id, [...(due.get(c.user_id) ?? []), c])
+    const dueAt = c.next_call_at ? new Date(c.next_call_at).getTime() : last + c.contact_every_days * DAY
+    if (dueAt <= Date.now() && Date.now() - last <= GRAVE_DAYS * DAY) // in the graveyard: no daily nagging, matches the app
+      due.set(c.user_id, [...(due.get(c.user_id) ?? []), c])
+    if (c.birthday) {
+      const b = new Date(c.birthday)
+      if (b.getUTCMonth() === now.getUTCMonth() && b.getUTCDate() === now.getUTCDate())
+        birthdays.set(c.user_id, [...(birthdays.get(c.user_id) ?? []), c.name])
+    }
   }
 
   let sent = 0
   for (const s of subs ?? []) {
     const list = (due.get(s.user_id) ?? []).sort((a, b) => a.importance - b.importance)
-    if (!list.length && !onlyUser) continue
+    const bdays = birthdays.get(s.user_id) ?? []
+    if (!list.length && !bdays.length && !onlyUser) continue
     const names = list.slice(0, 3).map(c => c.name).join(', ') + (list.length > 3 ? ` +${list.length - 3} more` : '')
-    const msg = !list.length
-      ? { title: 'Reminders are on ✓', body: "Nobody to call right now. We'll remind you when it's time." }
-      : list.length === 1
-        ? { title: `Time to call ${list[0].name} 📞`, body: 'Keep in touch: open the app to call.' }
-        : { title: `${list.length} people to call today 📞`, body: names }
+    const lines = [
+      bdays.length && `🎂 ${bdays.join(', ')} ${bdays.length === 1 ? "has a" : "have"} birthday today!`,
+      list.length === 1 && `📞 Time to call ${list[0].name}`,
+      list.length > 1 && `📞 ${list.length} people to call today: ${names}`,
+    ].filter(Boolean) as string[]
+    const msg = lines.length
+      ? { title: lines[0], body: lines.slice(1).join(' · ') || 'Open the app for details.' }
+      : { title: 'Reminders are on ✓', body: "Nobody to call right now. We'll remind you when it's time." }
     try {
       await webpush.sendNotification({ endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } }, JSON.stringify({ ...msg, url: '/' }))
       sent++

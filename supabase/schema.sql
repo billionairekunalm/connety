@@ -477,3 +477,6 @@ begin
     alter publication supabase_realtime add table public.posts;
   end if;
 end $$;
+-- Birthday reminders: checked by the same daily cron that already sends "time to call" pushes.
+-- Safe to run more than once.
+alter table contacts add column if not exists birthday date;
