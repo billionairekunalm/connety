@@ -114,6 +114,7 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
 .stack > :last-child .pcard { padding-bottom: 18px; }
 .pcard b { display: block; font-size: 20px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .pcard .small { opacity: .75; }
+.cat-tag { display: inline-flex; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; color: #111; }
 @keyframes rise { from { opacity: 0; transform: translateY(16px); } }
 
 .swipe { position: relative; border-radius: var(--radius); }

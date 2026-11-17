@@ -73,6 +73,13 @@ let MY_COUNTRY = guessCountry() // replaced by your card's country once loaded
 const catIds = () => CATS.map((_, k) => k + 1)
 const catName = (i: number) => CATS[i - 1]?.name ?? CATS[CATS.length - 1].name
 const catColor = (i: number) => CATS[i - 1]?.color ?? '#d4d4d4'
+// A pale wash of a category's colour, for card backgrounds — keeps the colour legible as a signal
+// without the whole card shouting in full saturation (the colour itself still carries the category).
+const catTint = (hex: string) => {
+  const n = parseInt(hex.slice(1), 16)
+  const mix = (c: number) => Math.round(c + (255 - c) * 0.82)
+  return `rgb(${mix((n >> 16) & 255)}, ${mix((n >> 8) & 255)}, ${mix(n & 255)})`
+}
 const TINTS = ['#a99bff', '#ffc145', '#a9c8ff', '#f7b3e4', '#c9e27f']
 const FREQS = [7, 14, 30, 60, 90]
 const LINK_PRESETS = ['LinkedIn', 'Instagram', 'Website', 'X', 'YouTube', 'Portfolio']
@@ -961,15 +968,17 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
     [c.name, c.phone, c.email, c.company, c.current_city, c.hometown, c.met_where, c.help_note, evName(c.event_id)].some(v => v?.toLowerCase().includes(ql)))
 
   const card = (c: Contact, i: number, swipe = false) => {
+    const cc = catColor(c.importance)
     const body = (
-      <div className={`pcard press ${inGrave(c) ? 'grave' : ''}`} style={{ background: catColor(c.importance), animationDelay: `${i * 45}ms` }} onClick={() => open(c.id)}>
+      <div className={`pcard press ${inGrave(c) ? 'grave' : ''}`}
+        style={{ background: catTint(cc), borderLeft: `5px solid ${cc}`, animationDelay: `${i * 45}ms` }} onClick={() => open(c.id)}>
         <Avatar c={c} url={selfie(c)} />
         <div className="grow">
           <b>{inGrave(c) && '🪦 '}{c.name}</b>
           <span className="small">
             {inGrave(c)
               ? `No contact for ${monthsSince(c)} months`
-              : <>{catName(c.importance)} · {swipe ? dueText(c) : c.company || c.met_where || evName(c.event_id) || dueText(c)}</>}
+              : <><span className="cat-tag" style={{ background: cc }}>{catName(c.importance)}</span> {swipe ? dueText(c) : c.company || c.met_where || evName(c.event_id) || dueText(c)}</>}
           </span>
         </div>
         {c.phone && <a className="circle" href={`tel:${c.phone}`} onClick={e => { e.stopPropagation(); startCall(c) }} aria-label={`Call ${c.name}`}><Ic n="phone" s={18} /></a>}
@@ -1077,7 +1086,9 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
           </div>
           <div className="chips">
             {[0, ...catIds()].map(l => (
-              <button key={l} className={`chip press ${level === l ? 'on' : ''}`} onClick={() => setLevel(l)}>
+              <button key={l} className={`chip press ${level === l ? 'on' : ''}`}
+                style={l && level === l ? { background: catColor(l), color: '#111', borderColor: '#111' } : undefined}
+                onClick={() => setLevel(l)}>
                 {l ? catName(l) : 'All'} <small>{(showGrave ? grave : alive).filter(c => !l || c.importance === l).length}</small>
               </button>
             ))}
