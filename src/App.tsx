@@ -42,6 +42,16 @@ type Post = {
   response_count: number; joined: boolean
 }
 type PostPerson = { user_id: string; name: string; photo_path: string | null }
+// "Share my info": someone who scanned your QR sent you their card. You review it, edit it and add them (or not).
+type ShareCard = {
+  name: string; headline: string | null; phone: string | null; email: string | null; city: string | null
+  hometown: string | null; help_with: string | null; photo_path: string | null; country?: string | null
+}
+type Share = {
+  id: string; from_user: string; to_user: string; message: string | null; card: ShareCard
+  lat: number | null; lng: number | null; room_id: string | null
+  status: 'pending' | 'accepted' | 'dismissed'; contact_id: string | null; created_at: string
+}
 type Tab = 'home' | 'people' | 'events' | 'posts'
 type Modal =
   | { kind: 'person'; id: string }
@@ -56,6 +66,7 @@ type Modal =
   | { kind: 'newPost' }
   | { kind: 'scan' }
   | { kind: 'settings' }
+  | { kind: 'share'; id: string }
   | null
 
 // Your categories (Settings): first = most important. contacts.importance is the 1-based position.
@@ -298,6 +309,23 @@ function PublicCard({ pid, mine, loggedIn }: { pid: string; mine: boolean; logge
     supabase.rpc('get_profile', { pid }).then(({ data }) => setP((data as Profile[] | null)?.[0] ?? null))
   }, [pid])
   useEffect(() => onInstallChange(() => rerender(n => n + 1)), [])
+  // signed-in scanner: have I already saved them / shared with them?
+  const [saved, setSaved] = useState(false)
+  const [saving, setSaving] = useState(false)
+  const [sharing, setSharing] = useState(false)
+  const [shareStatus, setShareStatus] = useState<string>('')
+  useEffect(() => {
+    if (!loggedIn || mine) return
+    supabase.from('contacts').select('id').eq('profile_id', pid).maybeSingle().then(({ data }) => setSaved(!!data))
+    supabase.from('shares').select('status').eq('to_user', pid).maybeSingle().then(({ data }) => setShareStatus((data as { status: string } | null)?.status ?? ''))
+  }, [pid, loggedIn])
+  const saveNow = async () => {
+    setSaving(true)
+    const { error } = await saveCard(pid, await here())
+    setSaving(false)
+    if (error) return alert(error.message)
+    setSaved(true)
+  }
   const installable = !isStandalone() && (canPrompt() || isIOS)
   // Ask after a few seconds, once they've had a look. Signed-in viewers only see it if there's an app to install.
   useEffect(() => {
@@ -325,13 +353,21 @@ function PublicCard({ pid, mine, loggedIn }: { pid: string; mine: boolean; logge
             ? <a className="btn-black press" href="/">This is your card · open app</a>
             : loggedIn
               ? <>
-                  <button className="btn-black press" onClick={connect}><Ic n="plus" s={18} /> Connect with {first}</button>
+                  {saved
+                    ? <a className="btn-ghost press saved-row" href="/"><Ic n="check" s={18} /> Saved to your people · open app</a>
+                    : <button className="btn-black press" disabled={saving} onClick={saveNow}><Ic n="plus" s={18} /> {saving ? 'Saving…' : `Save ${first}`}</button>}
+                  {shareStatus
+                    ? <p className="share-state" role="status">{shareStatus === 'accepted' ? `✓ ${first} added you` : `✓ Shared your info · waiting for ${first}`}</p>
+                    : <button className={saved ? 'btn-black press' : 'btn-ghost press'} onClick={() => setSharing(true)}>🤝 Share my info with {first}</button>}
                   <button className="btn-ghost press" onClick={() => saveVcard(p)}><Ic n="download" s={18} /> Save to phone contacts</button>
                 </>
               : <button className="btn-black press" onClick={() => setAsk(true)}><Ic n="lock" s={18} /> Sign in to save {first}</button>}
         </div>
         <p className="muted small center made">Made with Connections · only for people you actually met</p>
       </div>
+
+      {sharing && <ShareSheet pid={pid} name={p.name} photo={p.photo_path} onClose={() => setSharing(false)}
+        onDone={r => { setSharing(false); setShareStatus(r.status === 'dismissed' ? 'pending' : r.status) }} />}
 
       {ask && (
         <div className="backdrop" onClick={() => setAsk(false)}>
@@ -368,6 +404,77 @@ function PublicCard({ pid, mine, loggedIn }: { pid: string; mine: boolean; logge
         </div>
       )}
     </div>
+  )
+}
+
+// Save the card owner to my list only (the owner decides whether to add me back). Falls back to the old
+// two-way connect while the database hasn't got the newer function yet.
+async function saveCard(pid: string, loc: { lat: number; lng: number } | null) {
+  const args = { pid, lat: loc?.lat ?? null, lng: loc?.lng ?? null }
+  let r = await supabase.rpc('save_card', args)
+  if (r.error && (r.error.code === 'PGRST202' || /could not find the function/i.test(r.error.message))) r = await supabase.rpc('connect_with', args)
+  return r
+}
+
+// Bottom sheet: send my card to someone whose QR I scanned (optionally with a message).
+function ShareSheet({ pid, name, photo, onClose, onDone }: {
+  pid: string; name: string; photo?: string | null; onClose: () => void; onDone: (r: { status: string; created: boolean }) => void
+}) {
+  const [me, setMe] = useState<Profile | null>()
+  const [msg, setMsg] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const first = name.split(' ')[0]
+  useEffect(() => {
+    supabase.auth.getSession().then(async ({ data }) => {
+      const id = data.session?.user.id
+      const r = id ? await supabase.from('profiles').select('*').eq('id', id).maybeSingle() : { data: null }
+      setMe((r.data as Profile | null) ?? null)
+    })
+  }, [])
+
+  const send = async () => {
+    setBusy(true); setErr('')
+    const loc = await here()
+    const { data, error } = await supabase.rpc('share_with', { pid, msg: msg.trim() || null, lat: loc?.lat ?? null, lng: loc?.lng ?? null })
+    if (error) {
+      setBusy(false)
+      return setErr(/could not find the function/i.test(error.message) ? "Sharing isn't switched on yet." : error.message)
+    }
+    const res = data as { id: string; status: string; created: boolean }
+    // Best effort: a push for the receiver. If it fails they still see the share the next time they open the app.
+    if (res.created) void supabase.functions.invoke('notify-share', { body: { share_id: res.id } }).catch(() => {})
+    onDone(res)
+  }
+
+  return createPortal(
+    <div className="backdrop" onClick={onClose}>
+      <div className="bottom-sheet note-sheet share-sheet" role="dialog" aria-modal="true" aria-labelledby="share-title" onClick={e => e.stopPropagation()}>
+        <div className="grabber" />
+        <div className="ask-head">
+          {me?.photo_path ? <img src={pub(me.photo_path)} alt="" className="app-icon round" /> : <div className="app-icon round">{(me?.name ?? '?')[0]}</div>}
+          {photo ? <img src={pub(photo)} alt="" className="app-icon round" /> : <div className="app-icon round">{first[0]}</div>}
+        </div>
+        <h3 id="share-title">Share your info with {first}</h3>
+        <p className="muted small">{first} gets a notification with your card to review and add. They choose whether to save you.</p>
+        {me && (
+          <div className="share-preview">
+            <b>{me.name}</b>
+            {me.headline && <span>{me.headline}</span>}
+            <span className="sp-chips">
+              {me.phone && <i>📞 {me.phone}</i>}{me.email && <i>✉️ {me.email}</i>}{me.city && <i>📍 {me.city}</i>}
+            </span>
+          </div>
+        )}
+        <textarea rows={2} maxLength={500} value={msg} onChange={e => setMsg(e.target.value)} placeholder={`Add a message (optional). “Great meeting you at the summit!”`} />
+        {err && <p className="msg" role="alert">{err}</p>}
+        <div className="two">
+          <button className="btn-ghost press" onClick={onClose}>Not now</button>
+          <button className="btn-black press" disabled={busy || !me} onClick={send}>{busy ? 'Sending…' : <>Send <Ic n="arrow" s={16} /></>}</button>
+        </div>
+      </div>
+    </div>,
+    document.body,
   )
 }
 
@@ -806,15 +913,19 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
   const [rooms, setRooms] = useState<Room[]>([])
   const [posts, setPosts] = useState<Post[]>([])
   const [noteFor, setNoteFor] = useState<Contact>() // who the "how did the call go?" popup is for
+  const [shares, setShares] = useState<Share[]>([])
+  const [shareTo, setShareTo] = useState<{ id: string; name: string; photo?: string | null } | null>(null) // "share my info" sheet
+  const openShareId = useRef<string | null>(new URLSearchParams(location.search).get('share')) // from a notification link
 
   // ponytail: loads every note up front; fetch per person if someone logs thousands of calls.
   const load = async () => {
-    const [c, e, n, r, p] = await Promise.all([
+    const [c, e, n, r, p, sh] = await Promise.all([
       supabase.from('contacts').select('*').order('name'),
       supabase.from('events').select('*').order('date', { ascending: false }),
       supabase.from('interactions').select('*').order('created_at', { ascending: false }),
       supabase.rpc('my_rooms'),
       supabase.rpc('feed_posts'),
+      supabase.from('shares').select('*').order('created_at', { ascending: false }), // tolerant: ignored if the table isn't there yet
     ])
     if (c.error || e.error) return alert((c.error ?? e.error)!.message)
     setContacts(c.data)
@@ -822,6 +933,7 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
     setNotes(n.data ?? [])
     setRooms((r.data as Room[] | null) ?? [])
     setPosts((p.data as Post[] | null) ?? [])
+    setShares((sh.data as Share[] | null) ?? [])
     const paths = c.data.flatMap(x => [x.selfie_path, x.card_path]).filter(Boolean) as string[]
     if (paths.length) {
       const { data } = await supabase.storage.from('photos').createSignedUrls(paths, DAY / 1000)
@@ -836,8 +948,11 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
     let t: number | undefined
     const refresh = () => { clearTimeout(t); t = window.setTimeout(load, 250) } // one reload per burst
     const ch = supabase.channel(`live:${uid}`)
-    for (const table of ['contacts', 'events', 'interactions', 'rooms', 'posts'])
+    for (const table of ['contacts', 'events', 'interactions', 'rooms', 'posts', 'shares'])
       ch.on('postgres_changes' as any, { event: '*', schema: 'public', table }, refresh)
+    // someone just shared their info with me: tell me right away
+    ch.on('postgres_changes' as any, { event: 'INSERT', schema: 'public', table: 'shares', filter: `to_user=eq.${uid}` },
+      (e: { new?: Share }) => { if (e?.new?.card?.name) flash(`🤝 ${e.new.card.name} shared their details`) })
     ch.on('postgres_changes' as any, { event: 'UPDATE', schema: 'public', table: 'profiles', filter: `id=eq.${uid}` },
       (e: { new?: Profile }) => { if (e?.new?.id) setProfile(e.new) })
     ch.subscribe()
@@ -867,19 +982,41 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
     })
   }, [])
 
-  // Came here from someone's QR card: connect both ways, tagged with where we are.
+  // A tapped notification (or link) with ?share=<id>: open that share as soon as it has loaded.
+  useEffect(() => {
+    const id = openShareId.current
+    if (!id || !shares.some(x => x.id === id && x.to_user === uid && x.status === 'pending')) return
+    openShareId.current = null
+    history.replaceState(null, '', location.pathname)
+    setModal({ kind: 'share', id })
+  }, [shares])
+  // The installed app is already open when a notification is tapped: the service worker tells it which share.
+  useEffect(() => {
+    const onMsg = (ev: MessageEvent) => {
+      const id = ev.data?.type === 'open-url' ? new URL(ev.data.url, location.origin).searchParams.get('share') : null
+      if (id) { openShareId.current = id; load() }
+    }
+    navigator.serviceWorker?.addEventListener('message', onMsg)
+    return () => navigator.serviceWorker?.removeEventListener('message', onMsg)
+  }, [])
+
+  // Came here from someone's QR card: save them, then offer to share my info back.
   useEffect(() => {
     const pid = localStorage.getItem(PENDING)
     if (!pid) return
     localStorage.removeItem(PENDING)
     if (pid === uid) return
-    flash('Connecting…')
+    flash('Saving…')
     here().then(async loc => {
-      const { data, error } = await supabase.rpc('connect_with', { pid, lat: loc?.lat ?? null, lng: loc?.lng ?? null })
+      const { data, error } = await saveCard(pid, loc)
       if (error) return alert(error.message)
       await load()
-      flash("Connected ✓ You're in each other's lists")
+      flash('Saved ✓')
       setModal({ kind: 'person', id: data as string })
+      const them = ((await supabase.rpc('get_profile', { pid })).data as Profile[] | null)?.[0]
+      if (them && !((await supabase.from('shares').select('id').eq('to_user', pid).maybeSingle()).data)) {
+        setShareTo({ id: pid, name: them.name, photo: them.photo_path }) // they just signed in: finish the loop
+      }
     })
   }, [])
 
@@ -955,6 +1092,8 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
   const open = (id: string) => setModal({ kind: 'person', id })
   const selfie = (c: Contact) => (c.selfie_path ? urls[c.selfie_path] : pub(c.avatar_path))
   const evName = (id: string | null) => events.find(e => e.id === id)?.name
+  const incoming = shares.filter(x => x.to_user === uid && x.status === 'pending')
+  const myShare = (pid: string | null) => (pid ? shares.find(x => x.from_user === uid && x.to_user === pid) : undefined)
   const week = [...Array(7)].map((_, i) => new Date(Date.now() + i * DAY))
   // The graveyard sits apart: not in Today's calls or the main list until revived with a call.
   const alive = contacts.filter(c => !inGrave(c))
@@ -1013,6 +1152,17 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
               <Ic n="search" s={20} />
             </button>
           </header>
+
+          {incoming.length > 0 && (
+            <button className="share-banner press" onClick={() => setModal({ kind: 'share', id: incoming[0].id })}>
+              <span className="sb-av">{incoming[0].card.photo_path ? <img src={pub(incoming[0].card.photo_path)} alt="" /> : incoming[0].card.name[0]}</span>
+              <span className="grow">
+                <b>{incoming[0].card.name} shared their details</b>
+                <small>{incoming.length > 1 ? `+${incoming.length - 1} more · ` : ''}Tap to review and add</small>
+              </span>
+              <span className="count-dot">{incoming.length}</span>
+            </button>
+          )}
 
           <section className="hero press" onClick={() => setDay(0)}>
             <h2>Today's<br />calls</h2>
@@ -1203,10 +1353,12 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
       </nav>
 
       {toast && <div className="toast">{toast}</div>}
+      {shareTo && <ShareSheet pid={shareTo.id} name={shareTo.name} photo={shareTo.photo} onClose={() => setShareTo(null)}
+        onDone={r => { setShareTo(null); load(); flash(r.status === 'accepted' ? `✓ ${shareTo.name.split(' ')[0]} already added you` : '🤝 Shared. They\'ll get a notification') }} />}
       {noteFor && <CallNote c={noteFor} onSave={(b, f, n) => saveNote(noteFor, b, f, n)} onClose={() => setNoteFor(undefined)} />}
 
       {m && (
-        <div className="sheet" style={{ '--c': person ? catColor(person.importance) : m.kind === 'room' ? '#ffc145' : m.kind === 'post' ? '#c9e27f' : m.kind === 'scan' ? '#111111' : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
+        <div className="sheet" style={{ '--c': person ? catColor(person.importance) : m.kind === 'room' ? '#ffc145' : m.kind === 'post' ? '#c9e27f' : m.kind === 'scan' ? '#111111' : m.kind === 'share' ? '#ffc145' : event || m.kind === 'me' ? '#a99bff' : 'var(--bg)' } as CSSProperties}>
           <div className="sheet-top">
             <button className="circle white press" onClick={() => setModal(null)} aria-label="Back"><Ic n="back" /></button>
             {person && <button className="circle white press" onClick={() => setModal({ kind: 'edit', c: person })} aria-label="Edit"><Ic n="edit" s={20} /></button>}
@@ -1274,6 +1426,13 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
               {person.profile_id && (
                 <div className="pills center-row">
                   <a className="pill dark press" href={cardPath(person.profile_id)}><Ic n="card" s={14} /> View their card</a>
+                  {(() => {
+                    const sh = myShare(person.profile_id)
+                    const first = person.name.split(' ')[0]
+                    return !sh
+                      ? <button className="pill press" onClick={() => setShareTo({ id: person.profile_id!, name: person.name, photo: person.avatar_path })}>🤝 Share my info</button>
+                      : <span className={`pill ${sh.status === 'accepted' ? 'ok-pill' : ''}`}>{sh.status === 'accepted' ? `✓ ${first} added you` : '✓ Shared · waiting'}</span>
+                  })()}
                 </div>
               )}
 
@@ -1353,6 +1512,20 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
               </div>
             </div>
           )}
+
+          {m.kind === 'share' && (() => {
+            const sh = shares.find(x => x.id === m.id)
+            if (!sh || sh.status !== 'pending') return <div className="detail"><div className="empty-card">This share was already handled.</div></div>
+            return (
+              <ShareReview sh={sh} uid={uid} events={events} contacts={contacts} urls={urls}
+                onAdded={async cid => {
+                  const { error } = await supabase.rpc('resolve_share', { sid: sh.id, new_status: 'accepted', cid })
+                  if (error) alert(error.message)
+                  await load(); flash(`✓ ${sh.card.name.split(' ')[0]} added`); setModal({ kind: 'person', id: cid })
+                }}
+                onDismiss={async () => { await supabase.rpc('resolve_share', { sid: sh.id, new_status: 'dismissed' }); await load(); setModal(null) }} />
+            )
+          })()}
 
           {m.kind === 'edit' && (
             <PersonForm uid={uid} c={m.c} eventId={m.eventId} events={events} contacts={contacts} urls={urls}
@@ -1464,14 +1637,52 @@ function PeopleMap({ contacts, events, onOpen, tall }: { contacts: Contact[]; ev
   )
 }
 
-function PersonForm({ uid, c, eventId, events, contacts, urls, done }: {
-  uid: string; c?: Contact; eventId?: string; events: Ev[]; contacts: Contact[]; urls: Record<string, string>; done: (id?: string) => void
+// The receiver's side of a share: their details in the normal add-person form, pre-filled and fully editable.
+function ShareReview({ sh, uid, events, contacts, urls, onAdded, onDismiss }: {
+  sh: Share; uid: string; events: Ev[]; contacts: Contact[]; urls: Record<string, string>
+  onAdded: (contactId: string) => void; onDismiss: () => void
 }) {
+  const card = sh.card
+  const first = card.name.split(' ')[0]
+  const roomEvent = sh.room_id ? events.find(e => e.room_id === sh.room_id) : undefined
+  const fromCard: Partial<Contact> = {
+    name: card.name, phone: card.phone, email: card.email, company: card.headline, current_city: card.city,
+    hometown: card.hometown, help_note: card.help_with, event_id: roomEvent?.id ?? null, met_where: roomEvent?.name ?? null,
+    lat: sh.lat, lng: sh.lng,
+  }
+  // Already in my list? Edit that person, filling only what's still empty with what they shared.
+  const existing = contacts.find(x => x.profile_id === sh.from_user)
+  const merged = existing && ({
+    ...existing,
+    ...Object.fromEntries(Object.entries(fromCard).filter(([k, v]) => v != null && !(existing as unknown as Record<string, unknown>)[k])),
+  } as Contact)
+  return (
+    <div className="share-review">
+      <div className="share-head">
+        <span className="sb-av big">{card.photo_path ? <img src={pub(card.photo_path)} alt="" /> : card.name[0]}</span>
+        <h2>{card.name} shared their details 🤝</h2>
+        {sh.message && <p className="sh-msg">“{sh.message}”</p>}
+        <p className="muted small">{existing ? `${first} is already in your people. Check what's new, then save.` : 'Check the details, add your own notes and category, then save.'}</p>
+        <button className="btn-ghost press" onClick={onDismiss}>Not now</button>
+      </div>
+      <PersonForm uid={uid} c={merged} prefill={existing ? undefined : fromCard} extra={{ profile_id: sh.from_user, avatar_path: card.photo_path }}
+        eventId={roomEvent?.id} events={events} contacts={contacts} urls={urls}
+        title={<>{existing ? 'UPDATE' : 'ADD'}<br />{first.toUpperCase()}</>} saveLabel={existing ? 'Save changes' : 'Add to my people'}
+        done={id => { if (id) onAdded(id) }} />
+    </div>
+  )
+}
+
+function PersonForm({ uid, c, eventId, events, contacts, urls, done, prefill, extra, title, saveLabel }: {
+  uid: string; c?: Contact; eventId?: string; events: Ev[]; contacts: Contact[]; urls: Record<string, string>; done: (id?: string) => void
+  prefill?: Partial<Contact>; extra?: Record<string, unknown>; title?: ReactNode; saveLabel?: string // used when adding from a share
+}) {
+  const d = (c ?? prefill) as Partial<Contact> | undefined // starting values: the person being edited, or a share's details
   const [f, setF] = useState({
-    name: c?.name ?? '', phone: splitNumber(c?.phone, MY_COUNTRY).national, email: c?.email ?? '', company: c?.company ?? '', current_city: c?.current_city ?? '', hometown: c?.hometown ?? '', met_where: c?.met_where ?? '', help_note: c?.help_note ?? '', birthday: c?.birthday ?? '',
-    importance: c?.importance ?? 2, contact_every_days: c?.contact_every_days ?? 30, event_id: c?.event_id ?? eventId ?? '',
+    name: d?.name ?? '', phone: splitNumber(d?.phone, MY_COUNTRY).national, email: d?.email ?? '', company: d?.company ?? '', current_city: d?.current_city ?? '', hometown: d?.hometown ?? '', met_where: d?.met_where ?? '', help_note: d?.help_note ?? '', birthday: d?.birthday ?? '',
+    importance: d?.importance ?? 2, contact_every_days: d?.contact_every_days ?? 30, event_id: d?.event_id ?? eventId ?? '',
   })
-  const [phoneCountry, setPhoneCountry] = useState(splitNumber(c?.phone, MY_COUNTRY).country)
+  const [phoneCountry, setPhoneCountry] = useState(splitNumber(d?.phone, MY_COUNTRY).country)
   const [selfie, setSelfie] = useState<File>()
   const [card, setCard] = useState<File>()
   const [scan, setScan] = useState('')
@@ -1501,9 +1712,9 @@ function PersonForm({ uid, c, eventId, events, contacts, urls, done }: {
       setScan("Couldn't read the card. Check your internet (first scan downloads the reader) and try again.")
     }
   }
-  const [loc, setLoc] = useState(c?.lat != null ? { lat: c.lat, lng: c.lng! } : null)
+  const [loc, setLoc] = useState(d?.lat != null ? { lat: d.lat, lng: d.lng! } : null)
   const [busy, setBusy] = useState(false)
-  useEffect(() => { if (!c) here().then(setLoc) }, [])
+  useEffect(() => { if (!d) here().then(setLoc) }, [])
   const set = (k: keyof typeof f) => (e: { target: { value: string } }) => setF({ ...f, [k]: e.target.value })
 
   const save = async () => {
@@ -1518,6 +1729,7 @@ function PersonForm({ uid, c, eventId, events, contacts, urls, done }: {
         ...f, event_id: f.event_id || null, phone, email, company: nn(f.company), current_city: nn(f.current_city), hometown: nn(f.hometown), birthday: f.birthday || null,
         contact_every_days: Math.max(1, +f.contact_every_days || 30),
         lat: loc?.lat ?? ev?.lat ?? null, lng: loc?.lng ?? ev?.lng ?? null,
+        ...extra,
         ...(selfie && { selfie_path: await upload(uid, selfie) }),
         ...(card && { card_path: await upload(uid, card) }),
       }
@@ -1544,7 +1756,7 @@ function PersonForm({ uid, c, eventId, events, contacts, urls, done }: {
 
   return (
     <form className="detail" onSubmit={e => { e.preventDefault(); save() }}>
-      <h1 className="big">{c ? 'EDIT' : 'NEW'}<br />PERSON</h1>
+      <h1 className="big">{title ?? <>{c ? 'EDIT' : 'NEW'}<br />PERSON</>}</h1>
 
       <MicButton onText={t => setF(p => ({
         ...p,
@@ -1615,7 +1827,7 @@ function PersonForm({ uid, c, eventId, events, contacts, urls, done }: {
       </div>
 
       <div className="cta">
-        <button className="btn-black press" disabled={busy}>{busy ? 'Saving…' : c ? 'Save changes' : 'Save person'}</button>
+        <button className="btn-black press" disabled={busy}>{busy ? 'Saving…' : saveLabel ?? (c ? 'Save changes' : 'Save person')}</button>
       </div>
     </form>
   )

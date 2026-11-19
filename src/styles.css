@@ -526,3 +526,32 @@ label { display: grid; gap: 6px; margin-bottom: 14px; font-size: 14px; font-weig
   .lg *, .lg-bg i { animation: none !important; }
   .lg mark::after { scale: 1 1; }
 }
+
+/* ---------- share my info ---------- */
+.share-banner {
+  width: 100%; display: flex; align-items: center; gap: 12px; padding: 12px 14px 12px 12px; margin: 0 0 14px; text-align: left;
+  border-radius: 24px; background: linear-gradient(135deg, #ffc145, #ff9a5a); color: #111; box-shadow: 0 12px 28px rgba(255, 154, 90, .35);
+  animation: rise .5s ease both, nudge 2.4s 1s ease-in-out infinite;
+}
+@keyframes nudge { 0%, 100% { translate: 0 0; } 50% { translate: 0 -3px; } }
+.share-banner b { display: block; font-size: 15px; } .share-banner small { opacity: .75; }
+.sb-av { width: 44px; height: 44px; flex: none; border-radius: 50%; overflow: hidden; display: grid; place-items: center; background: #111; color: #fff; font-weight: 700; border: 3px solid #fff; }
+.sb-av img { width: 100%; height: 100%; object-fit: cover; }
+.sb-av.big { width: 76px; height: 76px; font-size: 30px; margin: 0 auto 10px; }
+.count-dot { min-width: 26px; height: 26px; padding: 0 7px; border-radius: 13px; background: #111; color: #fff; font-weight: 800; font-size: 13px; display: grid; place-items: center; }
+
+.share-sheet { text-align: left; }
+.share-sheet .ask-head { justify-content: center; }
+.share-preview { display: grid; gap: 2px; padding: 12px 14px; border-radius: 18px; background: var(--bg); }
+.share-preview span { color: var(--muted); font-size: 13px; }
+.sp-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 4px; }
+.sp-chips i { font-style: normal; font-size: 12.5px; font-weight: 600; padding: 4px 10px; border-radius: 999px; background: var(--surface); color: var(--text); }
+.share-state { margin: 0; padding: 14px; text-align: center; border-radius: 999px; background: #dcfce7; color: #166534; font-weight: 600; }
+.saved-row { color: #166534; }
+
+.share-head { max-width: 560px; margin: 0 auto; text-align: center; display: grid; gap: 8px; justify-items: center; }
+.share-head h2 { font-size: 24px; line-height: 1.1; font-weight: 800; }
+.sh-msg { margin: 0; padding: 10px 16px; border-radius: 18px; background: var(--surface); font-style: italic; max-width: 100%; }
+.share-head .btn-ghost { width: auto; padding: 10px 22px; }
+.share-review > .detail { margin-top: 18px; }
+.ok-pill { background: #dcfce7; color: #166534; border-color: transparent; }

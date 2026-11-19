@@ -4,7 +4,7 @@
 // ponytail: localStorage caps at ~5 MB (~20 compressed photos); fine for testing, real data goes to Supabase.
 type Row = Record<string, any>
 const KEY = 'connections-local'
-const load = (): Record<string, Row[]> => ({ events: [], contacts: [], profiles: [], interactions: [], rooms: [], room_members: [], posts: [], post_responses: [], user_settings: [], ...JSON.parse(localStorage.getItem(KEY) ?? '{}') })
+const load = (): Record<string, Row[]> => ({ events: [], contacts: [], profiles: [], interactions: [], rooms: [], room_members: [], posts: [], post_responses: [], user_settings: [], shares: [], ...JSON.parse(localStorage.getItem(KEY) ?? '{}') })
 const store = (d: Record<string, Row[]>) => localStorage.setItem(KEY, JSON.stringify(d))
 const uid = () => { const e = localStorage.getItem(KEY + '-user'); return e ? 'local-' + e : null }
 const defaults: Record<string, () => Row> = {
@@ -25,7 +25,7 @@ const newRow = (table: string, r: Row) => ({ id: crypto.randomUUID?.() ?? `${Dat
 function from(table: string) {
   let op = 'select', payload: Row = {}, filter: [string, unknown] | undefined, order: [string, boolean] | undefined, single = false
   // Mirrors row level security. Rows saved before accounts existed (no user_id) stay visible to everyone.
-  const mine = (r: Row) => table === 'profiles' ? r.id === uid() : table === 'rooms' ? r.organizer_id === uid() : (r.user_id ?? uid()) === uid()
+  const mine = (r: Row) => table === 'profiles' ? r.id === uid() : table === 'rooms' ? r.organizer_id === uid() : table === 'shares' ? (r.from_user === uid() || r.to_user === uid()) : (r.user_id ?? uid()) === uid()
   const run = () => {
     const d = load()
     const match = (r: Row) => mine(r) && (!filter || r[filter[0]] === filter[1])
@@ -78,6 +78,59 @@ const isMember = (d: Record<string, Row[]>, roomId: string, user: string | null)
 async function rpc(fn: string, a: Row) {
   const d = load()
   if (fn === 'get_profile') return { data: d.profiles.filter(p => p.id === a.pid), error: null }
+  if (fn === 'save_card') {
+    const me = d.profiles.find(p => p.id === uid())
+    const them = d.profiles.find(p => p.id === a.pid)
+    const fail = (m: string) => ({ data: null, error: new Error(m) })
+    if (!uid() || a.pid === uid()) return fail('Cannot save this card')
+    if (!me) return fail('Create your own card first')
+    if (!them) return fail('Card not found')
+    let c = d.contacts.find(x => x.user_id === uid() && x.profile_id === them.id)
+    if (c) c.last_contacted_at = new Date().toISOString()
+    else {
+      c = newRow('contacts', {
+        user_id: uid(), profile_id: them.id, name: them.name, phone: them.phone, email: them.email, company: them.headline ?? null,
+        help_note: them.help_with, hometown: them.hometown, current_city: them.city, met_where: 'QR exchange', avatar_path: them.photo_path, lat: a.lat, lng: a.lng,
+      })
+      d.contacts.push(c)
+    }
+    store(d)
+    return { data: c.id, error: null }
+  }
+  if (fn === 'share_with') {
+    const me = d.profiles.find(p => p.id === uid())
+    const fail = (m: string) => ({ data: null, error: new Error(m) })
+    if (!uid() || a.pid === uid()) return fail('Cannot share with this card')
+    if (!me) return fail('Create your own card first')
+    if (!d.profiles.some(p => p.id === a.pid)) return fail('Card not found')
+    if (d.shares.filter(x => x.from_user === uid() && Date.now() - +new Date(x.created_at) < 864e5).length >= 30) return fail('Too many shares today. Try again tomorrow.')
+    const card = { name: me.name, headline: me.headline ?? null, phone: me.phone ?? null, email: me.email ?? null, city: me.city ?? null, hometown: me.hometown ?? null, help_with: me.help_with ?? null, photo_path: me.photo_path ?? null, country: me.country ?? null }
+    const note = String(a.msg ?? '').trim().slice(0, 500) || null
+    const room = d.rooms.find(r => isMember(d, r.id, uid()) && isMember(d, r.id, a.pid) && Date.now() >= +new Date(r.starts_at) - 36e5 && Date.now() <= +new Date(r.ends_at) + 864e5)
+    let sh = d.shares.find(x => x.from_user === uid() && x.to_user === a.pid)
+    let created = false
+    if (!sh) {
+      sh = { id: crypto.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`, from_user: uid(), to_user: a.pid, message: note, card, lat: a.lat ?? null, lng: a.lng ?? null,
+        room_id: room?.id ?? null, status: 'pending', contact_id: null, notified_at: null, created_at: new Date().toISOString() }
+      d.shares.push(sh)
+      created = true
+    } else if (sh.status === 'pending') {
+      Object.assign(sh, { card, message: note ?? sh.message, lat: a.lat ?? sh.lat, lng: a.lng ?? sh.lng, room_id: room?.id ?? sh.room_id })
+    }
+    store(d)
+    return { data: { id: sh.id, status: sh.status, created }, error: null }
+  }
+  if (fn === 'resolve_share') {
+    const fail = (m: string) => ({ data: null, error: new Error(m) })
+    if (!['accepted', 'dismissed'].includes(a.new_status)) return fail('Bad status')
+    if (a.cid && !d.contacts.some(c => c.id === a.cid && c.user_id === uid())) return fail('Not your contact')
+    const sh = d.shares.find(x => x.id === a.sid && x.to_user === uid() && x.status === 'pending')
+    if (!sh) return fail('Share not found or already handled')
+    sh.status = a.new_status
+    sh.contact_id = a.new_status === 'accepted' ? a.cid ?? null : null
+    store(d)
+    return { data: null, error: null }
+  }
   if (fn === 'connect_with') {
     const me = d.profiles.find(p => p.id === uid())
     const them = d.profiles.find(p => p.id === a.pid)

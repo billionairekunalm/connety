@@ -22,6 +22,7 @@ self.addEventListener('notificationclick', e => {
   const url = new URL(e.notification.data?.url || '/', self.location.origin).href
   e.waitUntil(clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
     const open = list.find(c => c.url.startsWith(self.location.origin))
-    return open ? open.focus() : clients.openWindow(url)
+    if (open) { open.postMessage({ type: 'open-url', url }); return open.focus() } // the app opens the right screen itself
+    return clients.openWindow(url)
   }))
 })
