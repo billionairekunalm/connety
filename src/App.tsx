@@ -11,6 +11,7 @@ const Intro = lazy(() => import('./Intro')) // only first-time visitors download
 import { COUNTRIES, byCode, flag, fullNumber, guessCountry, splitNumber, waDigits } from './countries'
 import { canPrompt, isIOS, isInstalled, isStandalone, onInstallChange, promptInstall, pushNeedsInstall, pushSupported, subscribePush } from './pwa'
 import { scanSupported, startScan } from './scanner'
+import { useTheme, type ThemePref } from './theme'
 
 type Contact = {
   id: string; event_id: string | null; profile_id: string | null; name: string; phone: string | null
@@ -84,13 +85,6 @@ let MY_COUNTRY = guessCountry() // replaced by your card's country once loaded
 const catIds = () => CATS.map((_, k) => k + 1)
 const catName = (i: number) => CATS[i - 1]?.name ?? CATS[CATS.length - 1].name
 const catColor = (i: number) => CATS[i - 1]?.color ?? '#d4d4d4'
-// A pale wash of a category's colour, for card backgrounds — keeps the colour legible as a signal
-// without the whole card shouting in full saturation (the colour itself still carries the category).
-const catTint = (hex: string) => {
-  const n = parseInt(hex.slice(1), 16)
-  const mix = (c: number) => Math.round(c + (255 - c) * 0.82)
-  return `rgb(${mix((n >> 16) & 255)}, ${mix((n >> 8) & 255)}, ${mix(n & 255)})`
-}
 const TINTS = ['#a99bff', '#ffc145', '#a9c8ff', '#f7b3e4', '#c9e27f']
 const FREQS = [7, 14, 30, 60, 90]
 const LINK_PRESETS = ['LinkedIn', 'Instagram', 'Website', 'X', 'YouTube', 'Portfolio']
@@ -224,6 +218,8 @@ const PATHS: Record<string, ReactNode> = {
   gear: <><circle cx="12" cy="12" r="3" /><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z" /></>,
   eye: <><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></>,
   eyeoff: <path d="M3 3l18 18M10.6 5.1A9.8 9.8 0 0 1 12 5c6.5 0 10 7 10 7a17 17 0 0 1-3.2 4.2M6.6 6.6A17 17 0 0 0 2 12s3.5 7 10 7a9.6 9.6 0 0 0 5.4-1.6M9.9 9.9a3 3 0 0 0 4.2 4.2" />,
+  sun: <><circle cx="12" cy="12" r="4" /><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" /></>,
+  moon: <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z" />,
   bell: <path d="M6 16v-5a6 6 0 0 1 12 0v5l2 2H4zM10 21a2 2 0 0 0 4 0" />,
   lock: <><rect x="5" y="11" width="14" height="10" rx="2" /><path d="M8 11V7a4 4 0 0 1 8 0v4" /></>,
 }
@@ -703,6 +699,7 @@ const GoogleIcon = () => (
 )
 
 function Login() {
+  const { theme, setPref } = useTheme()
   const [mode, setMode] = useState<'signin' | 'signup' | 'forgot'>('signin')
   const [name, setName] = useState('')
   const [email, setEmail] = useState('')
@@ -779,6 +776,8 @@ function Login() {
   return (
     <div className="lg">
       <div className="lg-bg" aria-hidden><i /><i /></div>
+      <button type="button" className="theme-fab press" onClick={() => setPref(theme === 'dark' ? 'light' : 'dark')}
+        aria-label={theme === 'dark' ? 'Switch to light mode' : 'Switch to dark mode'}><Ic n={theme === 'dark' ? 'sun' : 'moon'} s={20} /></button>
       <form className="lg-form" noValidate onSubmit={e => { e.preventDefault(); submit() }}>
         <div className="lg-hero" aria-hidden>
           <span className="lg-bub b1" style={{ '--d': '.5s' } as CSSProperties}>📞</span>
@@ -1110,7 +1109,7 @@ function Home({ uid, profile, setProfile, cats, setCats }: {
     const cc = catColor(c.importance)
     const body = (
       <div className={`pcard press ${inGrave(c) ? 'grave' : ''}`}
-        style={{ background: catTint(cc), borderLeft: `5px solid ${cc}`, animationDelay: `${i * 45}ms` }} onClick={() => open(c.id)}>
+        style={{ '--cat': cc, borderLeft: `5px solid ${cc}`, animationDelay: `${i * 45}ms` } as CSSProperties} onClick={() => open(c.id)}>
         <Avatar c={c} url={selfie(c)} />
         <div className="grow">
           <b>{inGrave(c) && '🪦 '}{c.name}</b>
@@ -1864,6 +1863,26 @@ function PhotoTile({ label, icon, capture, file, url, onFile, crop }: {
 
 // ---------- Settings ----------
 
+// Light / Dark / System, each shown as a little preview of how the app will look.
+function ThemePicker() {
+  const { pref, theme, setPref } = useTheme()
+  const opts: [ThemePref, string, string][] = [['light', 'Light', 'sun'], ['dark', 'Dark', 'moon'], ['system', 'System', 'gear']]
+  return (
+    <div className="theme-picker" role="radiogroup" aria-label="Appearance">
+      {opts.map(([v, label, icon]) => (
+        <button key={v} type="button" role="radio" aria-checked={pref === v} className={`theme-opt press ${pref === v ? 'on' : ''}`} onClick={() => setPref(v)}>
+          <span className={`mock ${v}`} aria-hidden>
+            <i className="m-top" /><i className="m-card" /><i className="m-line" /><i className="m-line s" />
+            <i className="m-dot" />
+          </span>
+          <span className="t-label"><Ic n={icon} s={15} /> {label}</span>
+        </button>
+      ))}
+      <p className="muted small theme-note">{pref === 'system' ? `Following your phone: currently ${theme}.` : `Always ${theme}.`}</p>
+    </div>
+  )
+}
+
 function Settings({ uid, profile, setProfile, cats, setCats, contacts, push, enableReminders, onContactsChanged, flash }: {
   uid: string; profile: Profile; setProfile: (p: Profile) => void; cats: Cat[]; setCats: (c: Cat[]) => void
   contacts: Contact[]; push: 'on' | 'off' | 'na'; enableReminders: () => void; onContactsChanged: () => void; flash: (t: string) => void
@@ -1908,6 +1927,9 @@ function Settings({ uid, profile, setProfile, cats, setCats, contacts, push, ena
   return (
     <div className="detail settings">
       <h1 className="big">SETTINGS</h1>
+
+      <h3 className="section-label">Appearance</h3>
+      <ThemePicker />
 
       <h3 className="section-label">Events</h3>
       <label className={`host-toggle press ${profile.hosts_events ? 'on' : ''}`}>

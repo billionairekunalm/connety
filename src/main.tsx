@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client'
 import 'leaflet/dist/leaflet.css'
 import './styles.css'
 import './pwa'
+import './theme' // follows the phone's light/dark setting live when the preference is System
 import App from './App'
 import { MISCONFIGURED } from './supabase'
 

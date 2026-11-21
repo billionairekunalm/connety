@@ -4,7 +4,7 @@
   position: fixed; inset: 0; z-index: 9000; overflow: hidden; background: var(--bg); color: var(--text);
   touch-action: pan-y; user-select: none; -webkit-user-select: none;
 }
-@media (prefers-color-scheme: dark) { .intro { --hl0: #8a6a14; --hl1: #5b4fc4; --hl2: #55702a; } }
+:root[data-theme="dark"] .intro { --hl0: #8a6a14; --hl1: #5b4fc4; --hl2: #55702a; }
 
 /* background tint changes per screen */
 .intro-bg i { position: absolute; inset: 0; opacity: 0; transition: opacity .7s ease; }
@@ -194,7 +194,7 @@
   .beam { display: none; }
 }
 
-@media (prefers-color-scheme: dark) { .lk.web { background: #4a4468; } }
+:root[data-theme="dark"] .lk.web { background: #4a4468; }
 
 /* sound toggle */
 .snd.off { color: var(--muted); }
